@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     const url = new URL(req.url);
 
     const sortId = url.searchParams.get("sortId") ?? "top-playing-now";
-    const limit = clamp(Number(url.searchParams.get("limit") ?? "50"), 1, 100);
+    const limit = clamp(Number(url.searchParams.get("limit") ?? "200"), 1, 200);
 
     // Build base URL to call your own internal API (works in prod + local)
     const baseUrl = `${url.protocol}//${url.host}`;

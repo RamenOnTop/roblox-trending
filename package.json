@@ -6,10 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "ingest:loop": "node scripts/ingest-loop.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
+    "lightweight-charts": "^5.1.0",
     "next": "16.1.1",
     "react": "19.2.3",
     "react-dom": "19.2.3"

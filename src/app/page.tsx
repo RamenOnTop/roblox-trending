@@ -1,33 +1,91 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+
+import GenreFinanceChart from "@/app/components/GenreFinanceChart";
+import type { UTCTimestamp } from "lightweight-charts";
 
 type TimeRange = "24h" | "7d" | "30d";
 
-type TrendingGame = {
-  id: string;
-  name: string;
-  creator: string;
-  tags: string[];
-  activePlayers: number;
-  growthPct: number; // +12.3 means up 12.3%
+type TrendingGenre = {
+  key: string;
+  trendScore: number;
+  gamesCount: number;
+  medianActivePlayers: number;
+  medianGrowth24hPct: number;
+  medianConfidence: number;
+  leaderGrowthMedian: number;
+  breakoutGrowthMedian: number;
+
+  confidenceBand: "Low" | "Medium" | "High";
+  opportunityScore: number;
+  breakoutsCount: number;
+
+  topGames: Array<{
+    id: string;
+    name: string;
+    creator: string;
+    activePlayers: number;
+    r24hPct: number;
+  }>;
 };
+
+function confidenceColor(band: "Low" | "Medium" | "High") {
+  if (band === "High") return "text-green-400";
+  if (band === "Medium") return "text-yellow-400";
+  return "text-zinc-400";
+}
+
+function opportunityBand(x: number) {
+  if (x >= 30) return { label: "High", cls: "text-green-400" };
+  if (x >= 18) return { label: "Medium", cls: "text-yellow-400" };
+  return { label: "Low", cls: "text-zinc-400" };
+}
+
+function saturationBand(gamesCount: number) {
+  if (gamesCount >= 25) return { label: "High", cls: "text-red-400" };
+  if (gamesCount >= 12) return { label: "Medium", cls: "text-yellow-400" };
+  return { label: "Low", cls: "text-green-400" };
+}
+
+function rangeToHours(range: TimeRange) {
+  if (range === "24h") return 24;
+  if (range === "7d") return 24 * 7;
+  return 24 * 30;
+}
 
 export default function Home() {
   const [range, setRange] = useState<TimeRange>("7d");
-  const [games, setGames] = useState<TrendingGame[]>([]);
+  const [genres, setGenres] = useState<TrendingGenre[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // NEW: selected genre + chart series
+  const [selectedKey, setSelectedKey] = useState<string>("");
+  const [series, setSeries] = useState<{ time: number; value: number }[]>([]);
+  const [seriesLoading, setSeriesLoading] = useState(false);
+
+  // Load trending genres list
   useEffect(() => {
     let cancelled = false;
 
     async function Load() {
       setLoading(true);
-      const Res = await fetch(`/api/trending?range=${range}`);
-      const Data = (await Res.json()) as { games: TrendingGame[] };
+
+      const windowHours = rangeToHours(range);
+      const Res = await fetch(
+        `/api/genres/trending?group=both&windowHours=${windowHours}&limit=20&topK=5&minPlayers=0`
+      );
+
+      const Data = await Res.json();
+      const Genres = Array.isArray(Data.genres) ? (Data.genres as TrendingGenre[]) : [];
+
       if (!cancelled) {
-        setGames(Data.games);
+        setGenres(Genres);
+
+        // auto-pick first genre if none selected yet
+        if (!selectedKey && Genres.length > 0) setSelectedKey(Genres[0]!.key);
+
         setLoading(false);
       }
     }
@@ -36,20 +94,42 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [range, selectedKey]);
 
-  const TrendingTags = useMemo(() => {
-    const Counts = new Map<string, number>();
-    for (const Game of games) {
-      for (const Tag of Game.tags) {
-        Counts.set(Tag, (Counts.get(Tag) ?? 0) + 1);
+  // Load chart series for selected genre + range
+  useEffect(() => {
+    let cancelled = false;
+
+    async function LoadSeries() {
+      if (!selectedKey) return;
+
+      setSeriesLoading(true);
+
+      const windowHours = rangeToHours(range);
+      const res = await fetch(
+        `/api/genres/series?group=both&key=${encodeURIComponent(
+          selectedKey
+        )}&windowHours=${windowHours}&bucketMinutes=30`
+      );
+      const json = await res.json();
+
+      if (!cancelled) {
+        setSeries(Array.isArray(json.points) ? json.points : []);
+        setSeriesLoading(false);
       }
     }
-    return [...Counts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([Tag]) => Tag);
-  }, [games]);
+
+    LoadSeries();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedKey, range]);
+
+  // Cast time to UTCTimestamp for lightweight-charts
+  const chartData = series.map((p) => ({
+    time: p.time as UTCTimestamp,
+    value: p.value,
+  }));
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -77,9 +157,9 @@ export default function Home() {
       <main className="mx-auto max-w-6xl px-6 py-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-3xl font-bold tracking-tight">Trending right now</h2>
+            <h2 className="text-3xl font-bold tracking-tight">Trending genres right now</h2>
             <p className="mt-2 max-w-xl text-zinc-400">
-              Step 1 uses mock data + a simple API route. Later we’ll replace this with real ingest + DB.
+              Use this to decide what kind of game to build (momentum + size + confidence).
             </p>
           </div>
 
@@ -104,77 +184,160 @@ export default function Home() {
         <section className="mt-8 grid gap-4 md:grid-cols-3">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 md:col-span-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Top trending games</h3>
+              <div>
+                <h3 className="text-lg font-semibold">Top trending genres</h3>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Using {range} of snapshots • Growth shown = 24h median • Score uses momentum + size
+                </p>
+              </div>
               <p className="text-sm text-zinc-400">Range: {range}</p>
             </div>
 
             {loading ? (
               <p className="mt-4 text-zinc-400">Loading…</p>
             ) : (
-              <div className="mt-4 grid gap-3">
-                {games.map((Game) => (
-                  <Link
-                    key={Game.id}
-                    href={`/games/${Game.id}`}
-                    className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 hover:bg-zinc-900"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-base font-semibold">{Game.name}</p>
-                        <p className="text-sm text-zinc-400">by {Game.creator}</p>
+              <>
+                {/* NEW: chart panel */}
+                <div className="mt-4">
+                  {seriesLoading ? (
+                    <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-zinc-400">
+                      Loading chart…
+                    </div>
+                  ) : (
+                    <GenreFinanceChart title={selectedKey || "—"} data={chartData} />
+                  )}
+                </div>
 
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {Game.tags.map((Tag) => (
-                            <span
-                              key={Tag}
-                              className="rounded-full border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-300"
-                            >
-                              {Tag}
+                <div className="mt-4 grid gap-3">
+                  {genres.map((G) => (
+                    <div
+                      key={G.key}
+                      onClick={() => setSelectedKey(G.key)}
+                      className={[
+                        "cursor-pointer rounded-2xl border bg-zinc-950 p-4",
+                        selectedKey === G.key ? "border-zinc-500" : "border-zinc-800",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-base font-semibold">{G.key}</p>
+
+                          <p className="text-sm text-zinc-400">
+                            {(() => {
+                              const s = saturationBand(G.gamesCount);
+                              return (
+                                <>
+                                  {G.gamesCount} games •{" "}
+                                  <span className={s.cls}>saturation {s.label}</span> •{" "}
+                                </>
+                              );
+                            })()}
+                            <span className={confidenceColor(G.confidenceBand)}>
+                              confidence {G.confidenceBand}
                             </span>
-                          ))}
+                            {" • "}
+                            <span className="text-zinc-300">
+                              breakouts {G.breakoutsCount}
+                              <span className="text-zinc-600"> (≥+8% & +2k)</span>
+                            </span>
+                            {" • "}
+                            {(() => {
+                              const o = opportunityBand(G.opportunityScore);
+                              return (
+                                <span className={o.cls}>
+                                  opportunity {o.label}{" "}
+                                  <span className="text-zinc-600">
+                                    ({G.opportunityScore.toFixed(1)})
+                                  </span>
+                                </span>
+                              );
+                            })()}
+                          </p>
+
+                          {(() => {
+                            const leadersCls =
+                              G.leaderGrowthMedian >= 0 ? "text-green-400" : "text-red-400";
+                            const smallsCls =
+                              G.breakoutGrowthMedian >= 0 ? "text-green-400" : "text-red-400";
+
+                            return (
+                              <div className="text-xs text-zinc-500">
+                                <span className={leadersCls}>
+                                  Leaders: {G.leaderGrowthMedian.toFixed(1)}%
+                                </span>
+                                {" • "}
+                                <span className={smallsCls}>
+                                  Smalls: {G.breakoutGrowthMedian.toFixed(1)}%
+                                </span>
+                              </div>
+                            );
+                          })()}
+
+                          <div className="mt-3 grid gap-2">
+                            {G.topGames?.slice(0, 3).map((tg) => (
+                              <Link
+                                key={tg.id}
+                                href={`/games/${tg.id}`}
+                                className="block rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 hover:bg-zinc-800"
+                                onClick={(e) => e.stopPropagation()} // so clicking a game doesn't also change selection
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-medium">{tg.name}</p>
+                                    <p className="truncate text-xs text-zinc-400">by {tg.creator}</p>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-xs text-zinc-400">
+                                      {tg.activePlayers.toLocaleString()}
+                                    </p>
+                                    <p
+                                      className={
+                                        tg.r24hPct >= 0
+                                          ? "text-green-400 text-xs"
+                                          : "text-red-400 text-xs"
+                                      }
+                                    >
+                                      {tg.r24hPct >= 0 ? "+" : ""}
+                                      {tg.r24hPct.toFixed(1)}%
+                                    </p>
+                                  </div>
+                                </div>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <p className="text-sm text-zinc-400">Median active</p>
+                          <p className="text-xl font-bold">
+                            {Math.round(G.medianActivePlayers).toLocaleString()}
+                          </p>
+                          <p className={G.medianGrowth24hPct >= 0 ? "text-green-400" : "text-red-400"}>
+                            {G.medianGrowth24hPct >= 0 ? "+" : ""}
+                            {G.medianGrowth24hPct.toFixed(1)}% (24h)
+                          </p>
                         </div>
                       </div>
-
-                      <div className="text-right">
-                        <p className="text-sm text-zinc-400">Active</p>
-                        <p className="text-xl font-bold">{Game.activePlayers.toLocaleString()}</p>
-                        <p className={Game.growthPct >= 0 ? "text-green-400" : "text-red-400"}>
-                          {Game.growthPct >= 0 ? "+" : ""}
-                          {Game.growthPct.toFixed(1)}%
-                        </p>
-                      </div>
                     </div>
-                  </Link>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
 
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-            <h3 className="text-lg font-semibold">Trending tags</h3>
-            <p className="mt-1 text-sm text-zinc-400">Most common tags in the list.</p>
-
-            <div className="mt-4 flex flex-wrap gap-2">
-              {TrendingTags.length === 0 && !loading ? (
-                <span className="text-zinc-400">No tags yet.</span>
-              ) : (
-                TrendingTags.map((Tag) => (
-                  <span
-                    key={Tag}
-                    className="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1 text-sm text-zinc-200"
-                  >
-                    {Tag}
-                  </span>
-                ))
-              )}
-            </div>
+            <h3 className="text-lg font-semibold">How to use this</h3>
+            <p className="mt-1 text-sm text-zinc-400">
+              Pick genres that are growing (green), have enough size (median active), and decent
+              confidence.
+            </p>
 
             <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-              <p className="text-sm font-semibold">Next up (Step 2)</p>
+              <p className="text-sm font-semibold">Next (best upgrade)</p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-400">
-                <li>Supabase Postgres schema</li>
-                <li>Ingest job (GitHub Actions)</li>
-                <li>Real trend scoring</li>
+                <li>Add keyword extractor (titles/descriptions) per genre</li>
+                <li>Add “Opportunity score” (momentum vs competition)</li>
+                <li>Add genre trend chart over time</li>
               </ul>
             </div>
           </div>
@@ -183,7 +346,7 @@ export default function Home() {
 
       <footer className="border-t border-zinc-800">
         <div className="mx-auto max-w-6xl px-6 py-6 text-sm text-zinc-500">
-          Built with Next.js + TypeScript (Step 1)
+          Built with Next.js + TypeScript
         </div>
       </footer>
     </div>
