@@ -1,3 +1,4 @@
+// app/games/[id]/pages.tsx
 import Link from "next/link";
 
 type PageProps = {

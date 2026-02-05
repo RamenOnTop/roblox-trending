@@ -1,3 +1,6 @@
+// app/api/ingest/route.ts
+
+
 import { NextResponse } from "next/server";
 import { SupabaseServer } from "@/app/lib/supabaseServer"; // <-- make sure file name matches
 

@@ -6,14 +6,21 @@ import { useEffect, useState } from "react";
 import GenreFinanceChart from "@/app/components/GenreFinanceChart";
 import type { UTCTimestamp } from "lightweight-charts";
 
-type TimeRange = "24h" | "7d" | "30d";
+type TimeRange = "24h" | "7d" | "2w" | "30d";
 
 type TrendingGenre = {
   key: string;
   trendScore: number;
   gamesCount: number;
+
   medianActivePlayers: number;
+  medianGrowthPct: number | null;
+
+  medianWindowHoursUsed?: number;
+  windowCoverage?: number;
+
   medianGrowth24hPct: number;
+
   medianConfidence: number;
   leaderGrowthMedian: number;
   breakoutGrowthMedian: number;
@@ -26,7 +33,8 @@ type TrendingGenre = {
     id: string;
     name: string;
     creator: string;
-    activePlayers: number;
+    activePlayersNow: number;
+    rWindowPct: number | null;
     r24hPct: number;
   }>;
 };
@@ -49,10 +57,21 @@ function saturationBand(gamesCount: number) {
   return { label: "Low", cls: "text-green-400" };
 }
 
+
 function rangeToHours(range: TimeRange) {
   if (range === "24h") return 24;
   if (range === "7d") return 24 * 7;
+  if (range === "2w") return 24 * 14;
   return 24 * 30;
+}
+
+function fmtHours(h: number) {
+  if (!Number.isFinite(h) || h <= 0) return "—";
+  if (h < 24) return `${h.toFixed(0)}h`;
+  const d = h / 24;
+  // 0-3 days: show 1 decimal, otherwise no decimals
+  const s = d < 3 ? d.toFixed(1) : d.toFixed(0);
+  return `${s}d`;
 }
 
 export default function Home() {
@@ -94,7 +113,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [range, selectedKey]);
+  }, [range]);
 
   // Load chart series for selected genre + range
   useEffect(() => {
@@ -109,7 +128,7 @@ export default function Home() {
       const res = await fetch(
         `/api/genres/series?group=both&key=${encodeURIComponent(
           selectedKey
-        )}&windowHours=${windowHours}&bucketMinutes=30`
+        )}&windowHours=${windowHours}&bucketMinutes=0`
       );
       const json = await res.json();
 
@@ -164,7 +183,7 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-2">
-            {(["24h", "7d", "30d"] as const).map((R) => (
+            {(["24h", "7d", "2w", "30d"] as const).map((R) => (
               <button
                 key={R}
                 onClick={() => setRange(R)}
@@ -187,7 +206,7 @@ export default function Home() {
               <div>
                 <h3 className="text-lg font-semibold">Top trending genres</h3>
                 <p className="mt-1 text-xs text-zinc-500">
-                  Using {range} of snapshots • Growth shown = 24h median • Score uses momentum + size
+                  Using {range} of snapshots • Growth shown = {range} median • Score uses momentum + size
                 </p>
               </div>
               <p className="text-sm text-zinc-400">Range: {range}</p>
@@ -262,13 +281,9 @@ export default function Home() {
 
                             return (
                               <div className="text-xs text-zinc-500">
-                                <span className={leadersCls}>
-                                  Leaders: {G.leaderGrowthMedian.toFixed(1)}%
-                                </span>
-                                {" • "}
-                                <span className={smallsCls}>
-                                  Smalls: {G.breakoutGrowthMedian.toFixed(1)}%
-                                </span>
+                                <span className={leadersCls}>Leaders: {G.leaderGrowthMedian.toFixed(1)}%</span>
+                                  { " • "}
+                                <span className={smallsCls}>Smalls: {G.breakoutGrowthMedian.toFixed(1)}%</span>
                               </div>
                             );
                           })()}
@@ -287,36 +302,50 @@ export default function Home() {
                                     <p className="truncate text-xs text-zinc-400">by {tg.creator}</p>
                                   </div>
                                   <div className="text-right">
-                                    <p className="text-xs text-zinc-400">
-                                      {tg.activePlayers.toLocaleString()}
-                                    </p>
-                                    <p
-                                      className={
-                                        tg.r24hPct >= 0
-                                          ? "text-green-400 text-xs"
-                                          : "text-red-400 text-xs"
-                                      }
-                                    >
-                                      {tg.r24hPct >= 0 ? "+" : ""}
-                                      {tg.r24hPct.toFixed(1)}%
-                                    </p>
+                                    <p className="text-xs text-zinc-400">{tg.activePlayersNow.toLocaleString()}</p>
+                                    {tg.rWindowPct == null ? (
+                                      <p className="text-zinc-500 text-xs">—</p>
+                                      ) : (
+                                      <p className={tg.rWindowPct >= 0 ? "text-green-400 text-xs" : "text-red-400 text-xs"}>
+                                        {tg.rWindowPct >= 0 ? "+" : ""}
+                                        {tg.rWindowPct.toFixed(1)}%
+                                      </p>
+                                      )}
                                   </div>
                                 </div>
                               </Link>
                             ))}
                           </div>
                         </div>
-
-                        <div className="text-right">
+                        <div className="text-right shrink-0">
                           <p className="text-sm text-zinc-400">Median active</p>
                           <p className="text-xl font-bold">
                             {Math.round(G.medianActivePlayers).toLocaleString()}
                           </p>
-                          <p className={G.medianGrowth24hPct >= 0 ? "text-green-400" : "text-red-400"}>
-                            {G.medianGrowth24hPct >= 0 ? "+" : ""}
-                            {G.medianGrowth24hPct.toFixed(1)}% (24h)
-                          </p>
-                        </div>
+
+                          {G.medianGrowthPct == null ? (
+                            <p className="text-xs text-zinc-500 mt-1">—</p>
+                          ) : (
+                            <p className={G.medianGrowthPct >= 0 ? "text-green-400" : "text-red-400"}>
+                              {G.medianGrowthPct >= 0 ? "+" : ""}
+                              {G.medianGrowthPct.toFixed(1)}% <span className="text-zinc-500">({range})</span>
+                            </p>
+                          )}
+
+                          <p className="mt-1 text-xs text-zinc-500">
+                            req {range} • avail {fmtHours(G.medianWindowHoursUsed ?? rangeToHours(range))}
+                            {typeof G.windowCoverage === "number" ? (
+                            <span className="text-zinc-600"> • coverage {(G.windowCoverage * 100).toFixed(0)}%</span>
+                          ) : null}
+                        </p>
+
+                        {range !== "24h" && (
+                          <p className="text-xs text-zinc-500">
+                          24h median: {G.medianGrowth24hPct >= 0 ? "+" : ""}
+                          {G.medianGrowth24hPct.toFixed(1)}%
+                        </p>
+                      )}
+                    </div>
                       </div>
                     </div>
                   ))}

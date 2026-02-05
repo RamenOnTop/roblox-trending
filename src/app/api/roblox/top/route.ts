@@ -1,3 +1,4 @@
+// app/roblox/top/route.ts
 import { NextResponse } from "next/server";
 
 function clamp(n: number, min: number, max: number) {

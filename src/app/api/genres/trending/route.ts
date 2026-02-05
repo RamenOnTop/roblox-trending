@@ -46,15 +46,15 @@ function confidenceLabel(c: number) {
   if (c >= 0.33) return "Medium";
   return "Low";
 }
-function confidenceColor(c: number) {
-  if (c >= 0.66) return "text-green-400";
-  if (c >= 0.33) return "text-yellow-400";
-  return "text-zinc-400";
+function chunk<T>(arr: T[], size: number) {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
 }
 
 /**
- * Find the snapshot closest to (now - minutesBack), preferring snapshots at/before target.
- * If none exist, returns the oldest snapshot.
+ * Find snapshot closest to (now - minutesBack), preferring <= target.
+ * If none exist, returns oldest snapshot (this is the "use max available" behavior).
  */
 function pickSnapshot(snaps: Row[], nowMs: number, minutesBack: number): Row | null {
   if (snaps.length === 0) return null;
@@ -68,7 +68,7 @@ function pickSnapshot(snaps: Row[], nowMs: number, minutesBack: number): Row | n
   return snaps[snaps.length - 1] ?? null;
 }
 
-function scoreGame(snaps: Row[]) {
+function scoreGame(snaps: Row[], windowHours: number) {
   const now = snaps[0];
   const nowMs = parseMs(now.captured_at) || Date.now();
 
@@ -77,18 +77,15 @@ function scoreGame(snaps: Row[]) {
   const F0 = Math.max(0, safeNum(now.favorites));
   const like = clamp(now.like_ratio == null ? 0.5 : safeNum(now.like_ratio), 0, 1);
 
-  // liquidity weight (keeps tiny games from dominating)
   const liquidity = clamp(Math.log1p(P0), 0, 8);
   const qualityTilt = 2 * (like - 0.5);
 
+  // momentum horizons
   const s30 = pickSnapshot(snaps, nowMs, 30);
   const s6h = pickSnapshot(snaps, nowMs, 6 * 60);
   const s24h = pickSnapshot(snaps, nowMs, 24 * 60);
 
-  let r30 = 0,
-    r6h = 0,
-    r24h = 0;
-
+  let r30 = 0, r6h = 0, r24h = 0;
   let r6hPerHour = 0;
   let r24hPerHour = 0;
 
@@ -112,10 +109,13 @@ function scoreGame(snaps: Row[]) {
     if (h6 > 0) r6hPerHour = r6h / h6;
   }
 
+  let hoursUsed24 = 0;
   if (has24) {
     const P24 = Math.max(0, safeNum(s24h!.active_players));
     r24h = clamp(logReturn(P0, P24, 50), -2.0, 2.0);
     const h24 = hoursBetween(nowMs, parseMs(s24h!.captured_at));
+    hoursUsed24 = h24;
+
     growthAbs24 = P0 - P24;
     if (h24 > 0) {
       r24hPerHour = r24h / h24;
@@ -149,31 +149,56 @@ function scoreGame(snaps: Row[]) {
   const oldest = snaps[snaps.length - 1];
   const spanHours = oldest ? hoursBetween(nowMs, parseMs(oldest.captured_at)) : 0;
 
-  // confidence ramps toward 1 as you approach 24h of coverage + horizons exist
-  const coverage24 = clamp(spanHours / 24, 0, 1);
-  const horizonFactor =
-    0.15 + (has30 ? 0.25 : 0) + (has6 ? 0.25 : 0) + (has24 ? 0.35 : 0);
-  const confidence = clamp(coverage24 * horizonFactor, 0, 1);
+  // Window stats (ALWAYS "up to windowHours back", fallback to oldest available)
+  const sWin = pickSnapshot(snaps, nowMs, windowHours * 60);
 
-  const presence = 0.12 * liquidity + 0.35 * qualityTilt;
-  const finalScore = liquidity * momentumCore + (1 - confidence) * presence;
+  let rWindowPct = 0;
+  let growthAbsWindow = 0;
+  let windowHoursUsed = 0;
+
+  if (sWin && sWin !== now) {
+    const Pw = Math.max(0, safeNum(sWin.active_players));
+    const rWindow = clamp(logReturn(P0, Pw, 50), -3.0, 3.0);
+    rWindowPct = (Math.exp(rWindow) - 1) * 100;
+    growthAbsWindow = P0 - Pw;
+    windowHoursUsed = hoursBetween(nowMs, parseMs(sWin.captured_at));
+  }
 
   const r30Pct = (Math.exp(r30) - 1) * 100;
   const r6hPct = (Math.exp(r6h) - 1) * 100;
   const r24hPct = (Math.exp(r24h) - 1) * 100;
 
+  // Median active across the snaps we fetched (which are window-limited)
+  const medianActiveWindow = median(snaps.map((s) => Math.max(0, safeNum(s.active_players))));
+
+  // confidence (unchanged)
+  const coverage24 = clamp(spanHours / 24, 0, 1);
+  const horizonFactor = 0.15 + (has30 ? 0.25 : 0) + (has6 ? 0.25 : 0) + (has24 ? 0.35 : 0);
+  const confidence = clamp(coverage24 * horizonFactor, 0, 1);
+
+  const presence = 0.12 * liquidity + 0.35 * qualityTilt;
+  const finalScore = liquidity * momentumCore + (1 - confidence) * presence;
+
   return {
     score: Number.isFinite(finalScore) ? finalScore : 0,
     confidence: Number.isFinite(confidence) ? confidence : 0,
-    activePlayers: P0,
+
+    activePlayersNow: P0,
+
+    medianActiveWindow: Number.isFinite(medianActiveWindow) ? medianActiveWindow : 0,
+
+    rWindowPct: Number.isFinite(rWindowPct) ? rWindowPct : 0,
+    growthAbsWindow: Number.isFinite(growthAbsWindow) ? growthAbsWindow : 0,
+    windowHoursUsed: Number.isFinite(windowHoursUsed) ? windowHoursUsed : 0,
+
+    has24,
+    r24hPct: Number.isFinite(r24hPct) ? r24hPct : 0,
+    growthAbs24: Number.isFinite(growthAbs24) ? growthAbs24 : 0,
+    hoursUsed24: Number.isFinite(hoursUsed24) ? hoursUsed24 : 0,
 
     r30Pct: Number.isFinite(r30Pct) ? r30Pct : 0,
     r6hPct: Number.isFinite(r6hPct) ? r6hPct : 0,
-    r24hPct: Number.isFinite(r24hPct) ? r24hPct : 0,
-    
-    growthAbs24,  
-    has24,
-    spanHours,
+    spanHours: Number.isFinite(spanHours) ? spanHours : 0,
   };
 }
 
@@ -181,39 +206,110 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
 
-    // How you want to group genres:
-    // - group=both -> "l1 / l2"
-    // - group=l1   -> only genre_l1
-    // - group=l2   -> only genre_l2
     const group = (url.searchParams.get("group") ?? "both").toLowerCase();
-
-    // Genre list limit
     const limit = clamp(Number(url.searchParams.get("limit") ?? "20"), 1, 100);
 
-    // Analyze last N hours (defaults 7d)
-    const windowHours = clamp(Number(url.searchParams.get("windowHours") ?? String(24 * 7)), 6, 24 * 30);
+    const windowHours = clamp(
+      Number(url.searchParams.get("windowHours") ?? String(24 * 7)),
+      6,
+      24 * 30
+    );
 
-    // Ignore ultra tiny games (optional)
     const minPlayers = clamp(Number(url.searchParams.get("minPlayers") ?? "0"), 0, 1_000_000);
-
-    // Sum only the top K games in each genre (reduces outlier domination)
     const topK = clamp(Number(url.searchParams.get("topK") ?? "5"), 1, 25);
 
-    // Global row limit (raise as you track more games)
-    const maxRows = clamp(Number(url.searchParams.get("maxRows") ?? "50000"), 1000, 200000);
+    // caps you can tune
+    const maxGames = clamp(Number(url.searchParams.get("maxGames") ?? "2000"), 100, 10000);
+    const maxNowRows = clamp(Number(url.searchParams.get("maxNowRows") ?? "200000"), 10_000, 500_000);
+    const maxHistRowsTotal = clamp(Number(url.searchParams.get("maxHistRows") ?? "600000"), 10_000, 800_000);
 
-    const sinceIso = new Date(Date.now() - windowHours * 3600_000).toISOString();
+    const NOW_LOOKBACK_HOURS = clamp(Number(url.searchParams.get("nowLookbackHours") ?? "2"), 1, 12);
+    const BUFFER_HOURS = 2;
 
-    const { data, error } = await SupabaseServer
+    // Anchor "now" to latest captured_at in DB
+    const { data: lastRow, error: lastErr } = await SupabaseServer
       .from("game_snapshots")
-      .select("game_id, active_players, visits, favorites, like_ratio, captured_at, games(name, creator, genre_l1, genre_l2)")
-      .gte("captured_at", sinceIso)
+      .select("captured_at")
       .order("captured_at", { ascending: false })
-      .limit(maxRows);
+      .limit(1)
+      .maybeSingle();
 
-    if (error) return NextResponse.json({ genres: [], error: error.message }, { status: 500 });
+    if (lastErr) return NextResponse.json({ genres: [], error: lastErr.message }, { status: 500 });
 
-    const rows = (data ?? []) as Row[];
+    const anchorNowMs = parseMs((lastRow as any)?.captured_at ?? "") || Date.now();
+    const anchorNowIso = new Date(anchorNowMs).toISOString();
+
+    const sinceIso = new Date(anchorNowMs - (windowHours + BUFFER_HOURS) * 3600_000).toISOString();
+    const nowSinceIso = new Date(anchorNowMs - NOW_LOOKBACK_HOURS * 3600_000).toISOString();
+
+    // Step 1: pick current games (latest row per game from the last NOW_LOOKBACK_HOURS)
+    const latestByGame = new Map<string, Row>();
+
+    const pageSizeNow = 1000;
+    for (let offset = 0; offset < maxNowRows; offset += pageSizeNow) {
+      const { data: page, error: pageErr } = await SupabaseServer
+        .from("game_snapshots")
+        .select("game_id, active_players, visits, favorites, like_ratio, captured_at, games(name, creator, genre_l1, genre_l2)")
+        .gte("captured_at", nowSinceIso)
+        .lte("captured_at", anchorNowIso)
+        .order("captured_at", { ascending: false })
+        .range(offset, offset + pageSizeNow - 1);
+
+      if (pageErr) return NextResponse.json({ genres: [], error: pageErr.message }, { status: 500 });
+
+      const pageRows = (page ?? []) as Row[];
+      for (const r of pageRows) {
+        if (!latestByGame.has(r.game_id)) {
+          latestByGame.set(r.game_id, r);
+          if (latestByGame.size >= maxGames) break;
+        }
+      }
+
+      if (latestByGame.size >= maxGames) break;
+      if (pageRows.length < pageSizeNow) break;
+    }
+
+    const gameIds = Array.from(latestByGame.keys());
+    if (gameIds.length === 0) {
+      return NextResponse.json({
+        genres: [],
+        meta: { group, limit, windowHours, sinceIso, anchorNowIso, gamesScored: 0, distinctGenres: 0 },
+      });
+    }
+
+    // Step 2: fetch history for those games only
+    const rows: Row[] = [];
+    const idChunks = chunk(gameIds, 100);
+    const pageSizeHist = 1000;
+
+    let truncatedLikely = false;
+
+    for (const ids of idChunks) {
+      for (let offset = 0; offset < maxHistRowsTotal; offset += pageSizeHist) {
+        if (rows.length >= maxHistRowsTotal) {
+          truncatedLikely = true;
+          break;
+        }
+
+        const { data: page, error: pageErr } = await SupabaseServer
+          .from("game_snapshots")
+          .select("game_id, active_players, visits, favorites, like_ratio, captured_at")
+          .in("game_id", ids)
+          .gte("captured_at", sinceIso)
+          .lte("captured_at", anchorNowIso)
+          .order("captured_at", { ascending: false })
+          .range(offset, offset + pageSizeHist - 1);
+
+        if (pageErr) return NextResponse.json({ genres: [], error: pageErr.message }, { status: 500 });
+
+        const pageRows = (page ?? []) as Row[];
+        rows.push(...pageRows);
+
+        if (pageRows.length < pageSizeHist) break;
+      }
+
+      if (rows.length >= maxHistRowsTotal) break;
+    }
 
     // Group by game_id
     const byGame = new Map<string, Row[]>();
@@ -229,64 +325,57 @@ export async function GET(req: Request) {
       byGame.set(id, arr);
     }
 
-    // Score each game once
+    // Score games
     const scoredGames = Array.from(byGame.entries())
       .map(([gameId, snaps]) => {
-        const now = snaps[0];
-        const g1 = (now.games?.genre_l1 ?? null) as string | null;
-        const g2 = (now.games?.genre_l2 ?? null) as string | null;
+        const meta = latestByGame.get(gameId);
+        const g1 = (meta?.games?.genre_l1 ?? null) as string | null;
+        const g2 = (meta?.games?.genre_l2 ?? null) as string | null;
 
-        const s = scoreGame(snaps);
+        const s = scoreGame(snaps, windowHours);
 
         return {
           id: gameId,
-          name: now.games?.name ?? "Unknown",
-          creator: now.games?.creator ?? "Unknown",
+          name: meta?.games?.name ?? "Unknown",
+          creator: meta?.games?.creator ?? "Unknown",
           genre_l1: g1,
           genre_l2: g2,
 
-          activePlayers: s.activePlayers,
+          activePlayersNow: s.activePlayersNow,
+          medianActiveWindow: s.medianActiveWindow,
+
           score: s.score,
           confidence: s.confidence,
-          growthAbs24: s.growthAbs24,
 
+          rWindowPct: s.rWindowPct,
+          growthAbsWindow: s.growthAbsWindow,
+          windowHoursUsed: s.windowHoursUsed,
 
-          r30Pct: s.r30Pct,
-          r6hPct: s.r6hPct,
-          r24hPct: s.r24hPct,
           has24: s.has24,
+          r24hPct: s.r24hPct,
+          growthAbs24: s.growthAbs24,
+          hoursUsed24: s.hoursUsed24,
         };
       })
-      .filter((g) => g.activePlayers >= minPlayers);
+      .filter((g) => g.activePlayersNow >= minPlayers);
 
-    // Group games into genres
     type GameEntry = (typeof scoredGames)[number];
-    type GenreAgg = {
-      key: string;
-      genre_l1: string | null;
-      genre_l2: string | null;
-
-      games: GameEntry[];
-    };
-
+    type GenreAgg = { key: string; genre_l1: string | null; genre_l2: string | null; games: GameEntry[] };
     const byGenre = new Map<string, GenreAgg>();
 
     function makeKey(g1: string | null, g2: string | null) {
       if (group === "l1") return g1 ?? "Unknown";
       if (group === "l2") return g2 ?? "Unknown";
-
-      // group === "both"
       const a = g1 ?? "Unknown";
       const b = g2 ?? null;
-      return b ? `${a} / ${b}` : a; // no trailing slash
+      return b ? `${a} / ${b}` : a;
     }
 
     for (const g of scoredGames) {
       const key = makeKey(g.genre_l1, g.genre_l2);
       const existing = byGenre.get(key);
-      if (existing) {
-        existing.games.push(g);
-      } else {
+      if (existing) existing.games.push(g);
+      else {
         byGenre.set(key, {
           key,
           genre_l1: group === "l2" ? null : (g.genre_l1 ?? null),
@@ -296,12 +385,10 @@ export async function GET(req: Request) {
       }
     }
 
-    // Build final genre list
     const genres = Array.from(byGenre.values())
       .map((agg) => {
         const games = agg.games.slice().sort((a, b) => b.score - a.score);
 
-        // Trend score = sum of topK games, weighted slightly by confidence (reduces noisy 1-snapshot spikes)
         const top = games.slice(0, topK);
         const trendScore = top.reduce((sum, g) => {
           const w = 0.5 + 0.5 * clamp(g.confidence, 0, 1);
@@ -311,36 +398,40 @@ export async function GET(req: Request) {
         const gamesCount = games.length;
         const opportunityScore = gamesCount > 0 ? trendScore / Math.log1p(gamesCount) : 0;
 
-        // medians
-        const medianActivePlayers = median(games.map((g) => g.activePlayers));
+        const medianActivePlayers = median(
+          games.map((g) => (Number.isFinite(g.medianActiveWindow) ? g.medianActiveWindow : g.activePlayersNow))
+        );
+
+        const medianGrowthPct = median(games.map((g) => g.rWindowPct));
+        const medianWindowHoursUsed = median(games.map((g) => safeNum((g as any).windowHoursUsed, 0)));
+
+        const fullCoverageCount = games.filter((g) => safeNum((g as any).windowHoursUsed, 0) >= windowHours * 0.9).length;
+        const windowCoverage = gamesCount > 0 ? fullCoverageCount / gamesCount : 0;
+
+        // "24h median" secondary (but still "max available up to 24h" if you have less)
+        const medianGrowth24hPct = median(games.map((g) => g.r24hPct));
+        const full24Count = games.filter((g) => safeNum((g as any).hoursUsed24, 0) >= 24 * 0.9).length;
+        const growth24Coverage = gamesCount > 0 ? full24Count / gamesCount : 0;
+
         const medianConfidence = median(games.map((g) => g.confidence));
         const confidenceBand = confidenceLabel(medianConfidence);
 
-        // 24h median growth (only from games that actually have 24h coverage)
-        const with24 = games.filter((g) => g.has24);
-        const bigGames = with24.filter((g) => g.activePlayers >= 100_000);
-        const smallGames = with24.filter((g) => g.activePlayers < 50_000);
+        const leaders = games.filter((g) => g.activePlayersNow >= 100_000);
+        const smalls = games.filter((g) => g.activePlayersNow < 50_000);
 
-        const leaderGrowthMedian = median(bigGames.map((g) => g.r24hPct));
-        const breakoutGrowthMedian = median(smallGames.map((g) => g.r24hPct));
-        const growth24Median = median(with24.map((g) => g.r24hPct));
-        const growth24Coverage = gamesCount > 0 ? with24.length / gamesCount : 0;
+        const leaderGrowthMedian = median(leaders.map((g) => g.rWindowPct));
+        const breakoutGrowthMedian = median(smalls.map((g) => g.rWindowPct));
+
         const breakoutsCount = games.filter(
-          (g) => g.has24 &&
-            g.activePlayers < 75_000 &&
-            g.r24hPct >= 8 &&
-             g.growthAbs24 >= 2000
+          (g) => g.activePlayersNow < 75_000 && g.rWindowPct >= 8 && g.growthAbsWindow >= 2000
         ).length;
 
-        // show top games for the genre (for drill-down UI)
         const topGames = games.slice(0, 5).map((g) => ({
           id: g.id,
           name: g.name,
           creator: g.creator,
-          activePlayers: g.activePlayers,
-          score: g.score,
-          confidence: g.confidence,
-          r30Pct: g.r30Pct,
+          activePlayersNow: g.activePlayersNow,
+          rWindowPct: g.rWindowPct,
           r24hPct: g.r24hPct,
         }));
 
@@ -349,16 +440,24 @@ export async function GET(req: Request) {
           genre_l1: agg.genre_l1,
           genre_l2: agg.genre_l2,
 
+          windowHours,
+
           trendScore: Number.isFinite(trendScore) ? trendScore : 0,
           opportunityScore: Number.isFinite(opportunityScore) ? opportunityScore : 0,
           gamesCount,
           breakoutsCount,
 
+          medianActivePlayers: Number.isFinite(medianActivePlayers) ? medianActivePlayers : 0,
+          medianGrowthPct: Number.isFinite(medianGrowthPct) ? medianGrowthPct : 0,
+          windowCoverage,
+          medianWindowHoursUsed,
+
+          medianGrowth24hPct: Number.isFinite(medianGrowth24hPct) ? medianGrowth24hPct : 0,
+          growth24Coverage: Number.isFinite(growth24Coverage) ? growth24Coverage : 0,
+
           leaderGrowthMedian: Number.isFinite(leaderGrowthMedian) ? leaderGrowthMedian : 0,
           breakoutGrowthMedian: Number.isFinite(breakoutGrowthMedian) ? breakoutGrowthMedian : 0,
-          medianActivePlayers: Number.isFinite(medianActivePlayers) ? medianActivePlayers : 0,
-          medianGrowth24hPct: Number.isFinite(growth24Median) ? growth24Median : 0,
-          growth24Coverage: Number.isFinite(growth24Coverage) ? growth24Coverage : 0,
+
           medianConfidence: Number.isFinite(medianConfidence) ? medianConfidence : 0,
           confidenceBand,
 
@@ -368,21 +467,32 @@ export async function GET(req: Request) {
       .sort((a, b) => b.trendScore - a.trendScore)
       .slice(0, limit);
 
-    return NextResponse.json({
-      genres,
-      meta: {
-        group,
-        limit,
-        windowHours,
-        sinceIso,
-        maxRows,
-        minPlayers,
-        topK,
-        gamesScored: scoredGames.length,
-        distinctGenres: byGenre.size,
-        truncatedLikely: rows.length >= maxRows,
+    return NextResponse.json(
+      {
+        genres,
+        meta: {
+          group,
+          limit,
+          windowHours,
+          sinceIso,
+          anchorNowIso,
+          nowLookbackHours: NOW_LOOKBACK_HOURS,
+          bufferHours: BUFFER_HOURS,
+          maxGames,
+          maxNowRows,
+          maxHistRowsTotal,
+          gamesScored: scoredGames.length,
+          distinctGenres: byGenre.size,
+          truncatedLikely,
+          rowsFetched: rows.length,
+        },
       },
-    });
+      {
+        headers: {
+          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
+        },
+      }
+    );
   } catch (e: any) {
     return NextResponse.json({ genres: [], error: e?.message ?? "Unknown error" }, { status: 500 });
   }
