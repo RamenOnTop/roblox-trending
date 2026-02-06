@@ -2,6 +2,10 @@
 import { NextResponse } from "next/server";
 import { SupabaseServer } from "@/app/lib/supabaseServer";
 
+const __TREND_CACHE: Map<string, { exp: number; payload: any }> =
+  (globalThis as any).__TREND_CACHE ?? ((globalThis as any).__TREND_CACHE = new Map());
+
+
 type Row = {
   game_id: string;
   active_players: number | null;
@@ -205,6 +209,14 @@ function scoreGame(snaps: Row[], windowHours: number) {
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
+    const cacheKey = url.toString();
+    const hit = __TREND_CACHE.get(cacheKey);
+      if (hit && hit.exp > Date.now()) {
+        return NextResponse.json(hit.payload, {
+      headers: { "Cache-Control": "public, max-age=10, s-maxage=60, stale-while-revalidate=120" },
+      });
+    }
+
 
     const group = (url.searchParams.get("group") ?? "both").toLowerCase();
     const limit = clamp(Number(url.searchParams.get("limit") ?? "20"), 1, 100);
@@ -219,7 +231,19 @@ export async function GET(req: Request) {
     const topK = clamp(Number(url.searchParams.get("topK") ?? "5"), 1, 25);
 
     // caps you can tune
-    const maxGames = clamp(Number(url.searchParams.get("maxGames") ?? "2000"), 100, 10000);
+    // Auto-tune: longer windows => fewer candidates (because history rows per game explode)
+    const autoMaxGames =
+      windowHours <= 24 ? 1600 :
+      windowHours <= 24 * 7 ? 1000 :
+      windowHours <= 24 * 14 ? 700 :
+      500;
+
+    const maxGames = clamp(
+      Number(url.searchParams.get("maxGames") ?? String(autoMaxGames)),
+      100,
+      10000
+    );
+
     const maxNowRows = clamp(Number(url.searchParams.get("maxNowRows") ?? "200000"), 10_000, 500_000);
     const maxHistRowsTotal = clamp(Number(url.searchParams.get("maxHistRows") ?? "600000"), 10_000, 800_000);
 
@@ -285,30 +309,34 @@ export async function GET(req: Request) {
     let truncatedLikely = false;
 
     for (const ids of idChunks) {
-      for (let offset = 0; offset < maxHistRowsTotal; offset += pageSizeHist) {
-        if (rows.length >= maxHistRowsTotal) {
-          truncatedLikely = true;
-          break;
-        }
+        let cursorIso = anchorNowIso;
+        let first = true;
 
-        const { data: page, error: pageErr } = await SupabaseServer
+        while (rows.length < maxHistRowsTotal) {
+          const q = SupabaseServer
           .from("game_snapshots")
           .select("game_id, active_players, visits, favorites, like_ratio, captured_at")
           .in("game_id", ids)
           .gte("captured_at", sinceIso)
-          .lte("captured_at", anchorNowIso)
           .order("captured_at", { ascending: false })
-          .range(offset, offset + pageSizeHist - 1);
+          .limit(pageSizeHist);
+
+        const { data: page, error: pageErr } = await (first
+          ? q.lte("captured_at", cursorIso)
+          : q.lt("captured_at", cursorIso));
 
         if (pageErr) return NextResponse.json({ genres: [], error: pageErr.message }, { status: 500 });
 
         const pageRows = (page ?? []) as Row[];
+        if (pageRows.length === 0) break;
+
         rows.push(...pageRows);
 
         if (pageRows.length < pageSizeHist) break;
-      }
 
-      if (rows.length >= maxHistRowsTotal) break;
+        cursorIso = pageRows[pageRows.length - 1]!.captured_at;
+        first = false;
+      }
     }
 
     // Group by game_id
@@ -467,8 +495,7 @@ export async function GET(req: Request) {
       .sort((a, b) => b.trendScore - a.trendScore)
       .slice(0, limit);
 
-    return NextResponse.json(
-      {
+    const payload = {
         genres,
         meta: {
           group,
@@ -486,13 +513,13 @@ export async function GET(req: Request) {
           truncatedLikely,
           rowsFetched: rows.length,
         },
-      },
-      {
-        headers: {
-          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
-        },
-      }
-    );
+    }
+
+    __TREND_CACHE.set(cacheKey, { exp: Date.now() + 60_000, payload });
+
+    return NextResponse.json(payload, {
+      headers: { "Cache-Control": "public, max-age=10, s-maxage=60, stale-while-revalidate=120" },
+    });
   } catch (e: any) {
     return NextResponse.json({ genres: [], error: e?.message ?? "Unknown error" }, { status: 500 });
   }
