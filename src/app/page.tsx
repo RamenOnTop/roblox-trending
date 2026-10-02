@@ -95,7 +95,7 @@ export default function Home(){
             <p className={`heroChange ${((chartMode==='game'?metric?.growthPct:genre?.medianGrowthPct)??0)>=0?'positive':'negative'}`}>
               {chartMode==='game'?(metric?.growthPct==null?<span className="muted">Growth appears after more observations</span>:<><span>{percent(metric.growthPct)}</span><span className="muted"> across {duration(metric.hoursUsed)} of collected history</span></>):<><span>{percent(genre?.medianGrowthPct)}</span><span className="muted"> median change · {duration(genre?.medianWindowHoursUsed??0)} available</span></>}
             </p>
-            <GenreFinanceChart data={points} loading={chartLoading} label={chartMode==='game'?'Players':'Median players'} height={280}/>
+            <GenreFinanceChart hours={hours} data={points} loading={chartLoading} label={chartMode==='game'?'Players':'Median players'} height={280}/>
             <div className="chartFooter"><RangePicker hours={hours} onChange={setHours}/>{chartMode==='game'&&selected?<Link className="subtleLink" href={gameHref(selected.id)}>Explore game <Icon name="arrow" size={15}/></Link>:<span className="quietLabel">MEDIAN OF TRACKED GAMES</span>}</div>
             {historyError&&history.id===selectedId&&chartMode==='game'?<p className="chartNote">{historyError}</p>:null}
           </section>
