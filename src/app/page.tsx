@@ -26,16 +26,31 @@ export default function Home(){
   const [limit,setLimit]=useState(12);
   const {watchlist,toggle,ready,storageError}=useWatchlist();
 
-  useEffect(()=>{let cancelled=false;loadDashboard().then(data=>{
-    if(cancelled)return;setDataset(data);
-    setSelectedId([...data.games].sort((a,b)=>(b.activePlayers??0)-(a.activePlayers??0))[0]?.id??'');
-    setSelectedGenre(data.ranges['24']?.genres[0]?.key??'');
-  }).catch(failure=>{if(!cancelled)setError(failure.message);}).finally(()=>{if(!cancelled)setLoading(false);});return()=>{cancelled=true;};},[]);
+  useEffect(()=>{
+    let cancelled=false;let inFlight=false;
+    async function refresh(){
+      if(cancelled||inFlight||document.hidden)return;
+      inFlight=true;
+      try{
+        const data=await loadDashboard(true);
+        if(cancelled)return;
+        setDataset(data);setError('');
+        setSelectedId(current=>data.games.some(game=>game.id===current)?current:[...data.games].sort((a,b)=>(b.activePlayers??0)-(a.activePlayers??0))[0]?.id??'');
+        setSelectedGenre(current=>current||data.ranges['24']?.genres[0]?.key||'');
+      }catch(failure){if(!cancelled)setError(failure instanceof Error?failure.message:'The latest collection is temporarily unavailable.');}
+      finally{inFlight=false;if(!cancelled)setLoading(false);}
+    }
+    void refresh();
+    const interval=window.setInterval(()=>void refresh(),60000);
+    function onVisible(){void refresh();}
+    document.addEventListener('visibilitychange',onVisible);
+    return()=>{cancelled=true;window.clearInterval(interval);document.removeEventListener('visibilitychange',onVisible);};
+  },[]);
   useEffect(()=>{
     if(!selectedId)return;let cancelled=false;
     loadGameHistory(selectedId).then(points=>{if(!cancelled){setHistory({id:selectedId,points});setHistoryError('');}}).catch(()=>{if(!cancelled){setHistory({id:selectedId,points:[]});setHistoryError('Full history is temporarily unavailable. Showing collected preview observations.');}});
     return()=>{cancelled=true;};
-  },[selectedId]);
+  },[selectedId,dataset.meta.generatedAt]);
 
   const games=dataset.games;
   const selected=games.find(game=>game.id===selectedId);

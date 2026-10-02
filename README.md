@@ -12,7 +12,7 @@ Repository: https://github.com/RamenOnTop/roblox-trending
 
 Expected site: https://ramenontop.github.io/roblox-trending/
 
-In repository Settings → Pages, choose **GitHub Actions** as the source. The collection and deployment workflow runs on pushes to main, on manual dispatch, and around minutes 7 and 37 of each hour. GitHub's scheduler can delay or skip runs; timestamps represent actual collection times. Public-repository schedules can be disabled after 60 days without repository activity.
+In repository Settings → Pages, choose **GitHub Actions** as the source. The collection and deployment workflow runs on pushes to main, on manual dispatch, and around minutes 13 and 43 of each hour. GitHub's scheduler can delay or skip runs; timestamps represent actual collection times. Public-repository schedules can be disabled after 60 days without repository activity. The overview checks for published updates every minute while visible and when returning to the tab, preserving the selected game. Refreshing the page does not collect new Roblox data; collection still runs in Actions.
 
 The separate check workflow runs collector tests and a static production build on pull requests and pushes. Checks do not access Supabase or Roblox.
 

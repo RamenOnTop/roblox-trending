@@ -15,11 +15,12 @@ export type Dataset = {meta:DatasetMeta;games:Game[];ranges:Record<string,{genre
 const basePath = process.env.dashboardBasePath ?? '';
 let datasetRequest:Promise<Dataset>|undefined;
 async function readJson(url:string) {
-  const response = await fetch(url);
+  const response = await fetch(url,{cache:'no-store'});
   if (!response.ok) throw new Error('The latest collection is temporarily unavailable. Please try again.');
   return response.json();
 }
-export function loadDashboard():Promise<Dataset> {
+export function loadDashboard(refresh=false):Promise<Dataset> {
+  if(refresh)datasetRequest=undefined;
   datasetRequest ??= readJson(`${basePath}/data/dashboard.json`).catch(error=>{datasetRequest=undefined;throw error;});
   return datasetRequest;
 }
