@@ -24,7 +24,7 @@ await mkdir(stage, { recursive: true });
 const excluded = [resolve(root, 'src/app/api'), resolve(root, 'src/app/games'), resolve(root, 'src/app/lib/supabaseServer.ts')];
 await cp(join(root, 'src'), join(stage, 'src'), { recursive: true, filter: path => !excluded.some(item => path === item || path.startsWith(item + '/')) });
 await cp(join(root, 'public'), join(stage, 'public'), { recursive: true });
-for (const file of ['package.json', 'tsconfig.json', 'postcss.config.mjs', 'next-env.d.ts']) {
+for (const file of ['package.json', 'tsconfig.json', 'postcss.config.mjs']) {
   await cp(join(root, file), join(stage, file));
 }
 await mkdir(join(stage, 'src/app/game'), { recursive: true });
