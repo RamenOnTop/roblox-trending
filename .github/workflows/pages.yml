@@ -1,0 +1,57 @@
+name: Collect Roblox data and deploy Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '7,37 * * * *'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: robloxPagesCollection
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:data
+      - name: Collect public Roblox statistics
+        run: npm run collect
+        env:
+          supabaseUrl: ${{ secrets.supabaseUrl }}
+          supabaseServiceKey: ${{ secrets.supabaseServiceKey }}
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+      - name: Export static frontend
+        run: npm run build:pages
+        env:
+          pagesBasePath: ${{ steps.pages.outputs.base_path }}
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .pagesBuild/out
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

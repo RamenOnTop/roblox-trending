@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import GenreFinanceChart from "@/app/components/GenreFinanceChart";
 import type { UTCTimestamp } from "lightweight-charts";
+import { gameHref, loadGenreSeries, loadTrendingGenres, type DatasetMeta } from "@/app/lib/dashboardData";
 
 type TimeRange = "24h" | "7d" | "2w" | "30d";
 
@@ -19,11 +20,11 @@ type TrendingGenre = {
   medianWindowHoursUsed?: number;
   windowCoverage?: number;
 
-  medianGrowth24hPct: number;
+  medianGrowth24hPct: number | null;
 
   medianConfidence: number;
-  leaderGrowthMedian: number;
-  breakoutGrowthMedian: number;
+  leaderGrowthMedian: number | null;
+  breakoutGrowthMedian: number | null;
 
   confidenceBand: "Low" | "Medium" | "High";
   opportunityScore: number;
@@ -78,6 +79,9 @@ export default function Home() {
   const [range, setRange] = useState<TimeRange>("7d");
   const [genres, setGenres] = useState<TrendingGenre[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [meta, setMeta] = useState<DatasetMeta>({});
+  const [seriesError, setSeriesError] = useState("");
 
   // NEW: selected genre + chart series
   const [selectedKey, setSelectedKey] = useState<string>("");
@@ -91,22 +95,18 @@ export default function Home() {
     async function Load() {
       setLoading(true);
 
-      const windowHours = rangeToHours(range);
-      const Res = await fetch(
-        `/api/genres/trending?group=both&windowHours=${windowHours}&limit=20&topK=5&minPlayers=0`
-      );
-
-      const Data = await Res.json();
-      const Genres = Array.isArray(Data.genres) ? (Data.genres as TrendingGenre[]) : [];
-
-      if (!cancelled) {
-        setGenres(Genres);
-
-        // auto-pick first genre if none selected yet
-        if (!selectedKey && Genres.length > 0) setSelectedKey(Genres[0]!.key);
-
-        setLoading(false);
-      }
+      setError("");
+      try {
+        const Data = await loadTrendingGenres(rangeToHours(range));
+        const Genres = Array.isArray(Data.genres) ? (Data.genres as TrendingGenre[]) : [];
+        if (!cancelled) {
+          setGenres(Genres);
+          setMeta(Data.meta ?? {});
+          setSelectedKey(previous => previous && Genres.some(genre => genre.key === previous) ? previous : Genres[0]?.key ?? "");
+        }
+      } catch (failure) {
+        if (!cancelled) setError(failure instanceof Error ? failure.message : "Could not load trends.");
+      } finally { if (!cancelled) setLoading(false); }
     }
 
     Load();
@@ -120,22 +120,17 @@ export default function Home() {
     let cancelled = false;
 
     async function LoadSeries() {
-      if (!selectedKey) return;
+      if (!selectedKey) { setSeries([]); return; }
 
       setSeriesLoading(true);
 
-      const windowHours = rangeToHours(range);
-      const res = await fetch(
-        `/api/genres/series?group=both&key=${encodeURIComponent(
-          selectedKey
-        )}&windowHours=${windowHours}&bucketMinutes=0`
-      );
-      const json = await res.json();
-
-      if (!cancelled) {
-        setSeries(Array.isArray(json.points) ? json.points : []);
-        setSeriesLoading(false);
-      }
+      setSeriesError("");
+      try {
+        const json = await loadGenreSeries(selectedKey, rangeToHours(range));
+        if (!cancelled) setSeries(Array.isArray(json.points) ? json.points : []);
+      } catch (failure) {
+        if (!cancelled) { setSeries([]); setSeriesError(failure instanceof Error ? failure.message : "Could not load chart."); }
+      } finally { if (!cancelled) setSeriesLoading(false); }
     }
 
     LoadSeries();
@@ -157,7 +152,7 @@ export default function Home() {
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-xl bg-zinc-800" />
             <div>
-              <p className="text-sm text-zinc-400">Roblox AI</p>
+              <p className="text-sm text-zinc-400">Roblox</p>
               <h1 className="text-lg font-semibold leading-none">Trends</h1>
             </div>
           </div>
@@ -171,6 +166,7 @@ export default function Home() {
             </Link>
           </nav>
         </div>
+
       </header>
 
       <main className="mx-auto max-w-6xl px-6 py-8">
@@ -200,25 +196,33 @@ export default function Home() {
           </div>
         </div>
 
+        {meta.generatedAt ? <p className="mt-4 text-sm text-zinc-400">
+          Updated {new Date(meta.generatedAt).toLocaleString()} · {meta.gamesCollected} games tracked
+          {meta.historySource === "currentSnapshot" ? " · Live snapshot only; historical comparisons are unavailable." : ""}
+          {meta.historyTruncated || meta.trackingCapped ? " · Collection coverage is limited." : ""}
+        </p> : null}
+
         <section className="mt-8 grid gap-4 md:grid-cols-3">
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 md:col-span-2">
+          <div className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 md:col-span-2">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-semibold">Top trending genres</h3>
                 <p className="mt-1 text-xs text-zinc-500">
-                  Using {range} of snapshots • Growth shown = {range} median • Score uses momentum + size
+                  Requested range: {range} • Growth uses available history • Score uses momentum + size
                 </p>
               </div>
               <p className="text-sm text-zinc-400">Range: {range}</p>
             </div>
 
-            {loading ? (
+            {error ? <p className="mt-4 text-red-400" role="alert">{error}</p> : loading ? (
               <p className="mt-4 text-zinc-400">Loading…</p>
+            ) : genres.length === 0 ? (
+              <p className="mt-4 text-zinc-400">No current snapshots are available yet.</p>
             ) : (
               <>
                 {/* NEW: chart panel */}
                 <div className="mt-4">
-                  {seriesLoading ? (
+                  {seriesError ? <p className="text-red-400" role="alert">{seriesError}</p> : seriesLoading ? (
                     <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-zinc-400">
                       Loading chart…
                     </div>
@@ -237,8 +241,8 @@ export default function Home() {
                         selectedKey === G.key ? "border-zinc-500" : "border-zinc-800",
                       ].join(" ")}
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
+                      <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
+                        <div className="min-w-0 flex-1">
                           <p className="text-base font-semibold">{G.key}</p>
 
                           <p className="text-sm text-zinc-400">
@@ -247,7 +251,7 @@ export default function Home() {
                               return (
                                 <>
                                   {G.gamesCount} games •{" "}
-                                  <span className={s.cls}>saturation {s.label}</span> •{" "}
+                                  <span className={s.cls}>sample saturation {s.label}</span> •{" "}
                                 </>
                               );
                             })()}
@@ -273,26 +277,26 @@ export default function Home() {
                             })()}
                           </p>
 
-                          {(() => {
+                          {(G.medianWindowHoursUsed ?? 0) > 0 ? (() => {
                             const leadersCls =
-                              G.leaderGrowthMedian >= 0 ? "text-green-400" : "text-red-400";
+                              (G.leaderGrowthMedian ?? 0) >= 0 ? "text-green-400" : "text-red-400";
                             const smallsCls =
-                              G.breakoutGrowthMedian >= 0 ? "text-green-400" : "text-red-400";
+                              (G.breakoutGrowthMedian ?? 0) >= 0 ? "text-green-400" : "text-red-400";
 
                             return (
                               <div className="text-xs text-zinc-500">
-                                <span className={leadersCls}>Leaders: {G.leaderGrowthMedian.toFixed(1)}%</span>
+                                <span className={leadersCls}>Leaders: {G.leaderGrowthMedian == null ? "—" : `${G.leaderGrowthMedian.toFixed(1)}%`}</span>
                                   { " • "}
-                                <span className={smallsCls}>Smalls: {G.breakoutGrowthMedian.toFixed(1)}%</span>
+                                <span className={smallsCls}>Smalls: {G.breakoutGrowthMedian == null ? "—" : `${G.breakoutGrowthMedian.toFixed(1)}%`}</span>
                               </div>
                             );
-                          })()}
+                          })() : null}
 
                           <div className="mt-3 grid gap-2">
                             {G.topGames?.slice(0, 3).map((tg) => (
                               <Link
                                 key={tg.id}
-                                href={`/games/${tg.id}`}
+                                href={gameHref(tg.id)}
                                 className="block rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 hover:bg-zinc-800"
                                 onClick={(e) => e.stopPropagation()} // so clicking a game doesn't also change selection
                               >
@@ -317,7 +321,7 @@ export default function Home() {
                             ))}
                           </div>
                         </div>
-                        <div className="text-right shrink-0">
+                        <div className="shrink-0 sm:text-right">
                           <p className="text-sm text-zinc-400">Median active</p>
                           <p className="text-xl font-bold">
                             {Math.round(G.medianActivePlayers).toLocaleString()}
@@ -339,7 +343,7 @@ export default function Home() {
                           ) : null}
                         </p>
 
-                        {range !== "24h" && (
+                        {range !== "24h" && G.medianGrowth24hPct != null && (
                           <p className="text-xs text-zinc-500">
                           24h median: {G.medianGrowth24hPct >= 0 ? "+" : ""}
                           {G.medianGrowth24hPct.toFixed(1)}%
@@ -357,16 +361,16 @@ export default function Home() {
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
             <h3 className="text-lg font-semibold">How to use this</h3>
             <p className="mt-1 text-sm text-zinc-400">
-              Pick genres that are growing (green), have enough size (median active), and decent
-              confidence.
+              Compare growth, audience size, and historical coverage. These results describe the
+              tracked sample, which does not include every Roblox game.
             </p>
 
             <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-              <p className="text-sm font-semibold">Next (best upgrade)</p>
+              <p className="text-sm font-semibold">Reading the results</p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-400">
-                <li>Add keyword extractor (titles/descriptions) per genre</li>
-                <li>Add “Opportunity score” (momentum vs competition)</li>
-                <li>Add genre trend chart over time</li>
+                <li>Growth requires at least two recorded observations.</li>
+                <li>Check available history against the selected range.</li>
+                <li>Opportunity is a momentum heuristic; ML predictions are not available yet.</li>
               </ul>
             </div>
           </div>

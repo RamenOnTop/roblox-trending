@@ -14,7 +14,7 @@ export default function GenreFinanceChart({ title, data }: { title: string; data
   const ref = useRef<HTMLDivElement | null>(null);
 
   const change = useMemo(() => {
-    if (data.length < 2) return { abs: 0, pct: 0, last: 0 };
+    if (data.length < 2) return { abs: 0, pct: null, last: data[0]?.value ?? null };
     const first = data[0]!.value;
     const last = data[data.length - 1]!.value;
     const abs = last - first;
@@ -57,10 +57,10 @@ export default function GenreFinanceChart({ title, data }: { title: string; data
     };
   }, [data]);
 
-  const pctCls = change.pct >= 0 ? "text-green-400" : "text-red-400";
+  const pctCls = (change.pct ?? 0) >= 0 ? "text-green-400" : "text-red-400";
 
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+    <div className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
       <div className="flex items-end justify-between gap-4">
         <div>
           <p className="text-sm text-zinc-400">Genre</p>
@@ -68,10 +68,9 @@ export default function GenreFinanceChart({ title, data }: { title: string; data
         </div>
         <div className="text-right">
           <p className="text-sm text-zinc-400">Now</p>
-          <p className="text-xl font-bold">{Math.round(change.last).toLocaleString()}</p>
+          <p className="text-xl font-bold">{change.last == null ? "—" : Math.round(change.last).toLocaleString()}</p>
           <p className={`text-sm ${pctCls}`}>
-            {change.pct >= 0 ? "+" : ""}
-            {change.pct.toFixed(1)}%
+            {change.pct == null ? "More history needed" : `${change.pct >= 0 ? "+" : ""}${change.pct.toFixed(1)}%`}
           </p>
         </div>
       </div>

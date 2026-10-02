@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Roblox Trends
 
-## Getting Started
+A Next.js dashboard for exploring Roblox genre momentum. GitHub Pages serves the static frontend; GitHub Actions collects public Roblox statistics and publishes the dashboard dataset. Supabase is optional for the first live snapshot and required for durable history, growth comparisons, and future ML training.
 
-First, run the development server:
+## GitHub Pages and Actions
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Repository: https://github.com/RamenOnTop/roblox-trending
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Expected site: https://ramenontop.github.io/roblox-trending/
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+In repository Settings → Pages, choose **GitHub Actions** as the source. The collection and deployment workflow runs on pushes to main, on manual dispatch, and around minutes 7 and 37 of each hour. GitHub's scheduler can delay or skip runs; timestamps represent actual collection times. Public-repository schedules can be disabled after 60 days without repository activity.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The separate check workflow runs collector tests and a static production build on pull requests and pushes. Checks do not access Supabase or Roblox.
 
-## Learn More
+Without database secrets, deployment shows a current snapshot and explicitly reports that historical comparisons are unavailable. Each deployment replaces that snapshot; GitHub Pages is not a historical database. Missing observations are not converted to zero-player counts. A failed collection prevents deployment, preserving the previously published site.
 
-To learn more about Next.js, take a look at the following resources:
+### Connect a fresh Supabase dataset
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Run [database/freshDataset.sql](database/freshDataset.sql) in the fresh project's SQL Editor. It creates new tables; it does not wipe existing data.
+2. Add two repository Actions secrets under Settings → Secrets and variables → Actions:
+   - **supabaseUrl**: the project URL.
+   - **supabaseServiceKey**: the server-side service-role key for that project.
+3. Run **Collect Roblox data and deploy Pages** manually from the Actions tab.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Keep credentials out of source files, public environment variables, generated JSON, and Git commits. If only one secret is configured or the schema is missing, collection fails instead of silently pretending history was saved.
 
-## Deploy on Vercel
+| Table | Purpose |
+| --- | --- |
+| trendGames | Public game metadata and the saved tracking registry |
+| trendSnapshots | Raw observations for analytics and future ML |
+| trendHourlySamples | Latest observation per game per hour for compact dashboard history |
+| collectionRuns | Collection timing, success/failure, and warnings |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Row-level security is enabled without public read/write policies. Only the server worker receives the database key. The published JSON contains public Roblox metadata and derived statistics. Raw history has no automatic deletion policy; monitor database growth and add retention/partitioning when measurements justify it.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Roblox request strategy
+
+The collector uses universe IDs as game identifiers; a root place ID is used only for Roblox game links.
+
+1. Discover chart games through **https://apis.roblox.com/explore-api/v1/get-sort-content** with a sort ID and generated session ID. This endpoint worked in a live smoke check, but is not listed in the Creator Hub public API reference. It is isolated behind discoverGames and must not be treated as a stable, complete enumeration of Roblox.
+2. Combine discovered IDs with configured seeds and previously tracked IDs. With Supabase connected, games continue to be requested after disappearing from the chart, within the configured tracking cap.
+3. Request game details through the documented public batch endpoint **https://games.roblox.com/v1/games?universeIds=...**. Use player counts, visits, favorites, creation/update dates, creator, and genre fields.
+4. Request vote counts through **https://games.roblox.com/v1/games/votes?universeIds=...**. This avoids using chart payloads as authoritative ratings and avoids one request per game. If vote requests fail, the worker records unknown ratings and a warning.
+5. Use sequential batches of 50 IDs, 20-second request timeouts, and at most four attempts. Retry 429 and transient server/network errors with exponential backoff and jitter. Honor Retry-After; abort rather than retrying earlier than a long server-requested cooldown. No fixed quota or unlimited throughput is assumed.
+
+No Roblox account cookie or Open Cloud key is needed for these public statistics. Avoid per-game server-list scraping to estimate concurrent players; the game-details endpoint already supplies that statistic. Roblox's permissioned creator analytics APIs should not be assumed to provide private retention, revenue, or historical metrics for arbitrary other creators' games.
+
+The chart is a sample of popular games, not a catalog of all Roblox games. Add smaller games' universe IDs to **config/collection.json → seedUniverseIds** to improve coverage. The default tracking cap is 1,000 games. Historical reads use timestamp-plus-ID cursors so games sharing a collection timestamp are not skipped or repeatedly fetched.
+
+### Sources consulted
+
+- [Roblox games API reference](https://create.roblox.com/docs/cloud/reference/domains/games)
+- [Roblox APIs reference](https://create.roblox.com/docs/cloud/reference/domains/apis)
+- [Next.js static export support and limitations](https://nextjs.org/docs/app/guides/static-exports)
+- [GitHub Pages custom workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
+- [GitHub scheduled workflow behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
+
+## Local commands
+
+Run **npm ci**, **npm run test:data**, **npm run collect**, and **npm run build:pages**.
+
+Collection makes real read-only requests to Roblox and writes ignored public/data/dashboard.json. If the supabaseUrl and supabaseServiceKey environment variables are present, it also writes to the configured fresh database. Avoid setting these variables unless that database is ready.
+
+For a local export with the repository path, set pagesBasePath to /roblox-trending before building. The output is **.pagesBuild/out**. The build copies only frontend files into an isolated staging directory, excludes Next.js API routes and the server database client, and uses a static game detail page. It does not modify or publish .env.local.
+
+**npm run dev** retains the original Next.js server mode and its existing API routes/schema. The GitHub Pages collector uses the fresh schema independently; connecting the old development API routes to that schema is a separate migration.
+
+Current trend/opportunity scores remain formulas. ML predictions are not implemented. Fresh history must accumulate before meaningful multi-day comparisons or training can begin.

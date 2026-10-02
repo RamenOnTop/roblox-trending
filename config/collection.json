@@ -1,0 +1,8 @@
+{
+  "sortId": "top-playing-now",
+  "seedUniverseIds": [],
+  "batchSize": 50,
+  "maxTrackedGames": 1000,
+  "historyDays": 30,
+  "maxHistoryRows": 750000
+}
