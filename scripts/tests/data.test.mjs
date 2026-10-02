@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchJson, discoverGames, fetchGameStats, normalizeUniverseId } from '../lib/robloxClient.mjs';
+import { fetchJson, discoverGames, fetchGameStats, fetchGameVotes, normalizeUniverseId } from '../lib/robloxClient.mjs';
 import { buildDashboard, genreSeries, scoreGame } from '../lib/trends.mjs';
 
 const sample = (gameId, capturedAt, activePlayers) => ({ gameId, capturedAt, activePlayers, visits: 10000, favorites: 100, likeRatio: null });
@@ -75,6 +75,27 @@ test('non-retryable errors fail immediately', async () => {
   assert.equal(calls, 1);
 });
 
+test('repeated rate limits wait longer and stop after bounded attempts', async () => {
+  let calls = 0;
+  const delays = [];
+  await assert.rejects(fetchJson('https://games.roblox.com/v1/games', {
+    fetcher: async () => { calls++; return new Response('{}', {status:429}); },
+    sleep: async delay => delays.push(delay),
+  }), /HTTP 429/);
+  assert.equal(calls,4);
+  assert.equal(delays.length,3);
+  for (let index=0;index<delays.length;index++) assert.ok(delays[index]>=10000*2**index);
+});
+
+test('long server cooldowns stop collection instead of retrying early', async () => {
+  let calls = 0;
+  await assert.rejects(fetchJson('https://games.roblox.com/v1/games', {
+    fetcher: async () => { calls++; return new Response('{}', {status:429,headers:{'Retry-After':'120'}}); },
+    sleep: async () => assert.fail('Must not retry before the server cooldown'),
+  }), /retry after 120/);
+  assert.equal(calls,1);
+});
+
 test('discovery validates its shape and deduplicates universe IDs', async () => {
   assert.deepEqual(await discoverGames('top-playing-now', async () => ({ games: [{ universeId: 1 }, { universeId: 1 }, { universeId: null }] })), ['1']);
   await assert.rejects(discoverGames('top-playing-now', async () => ({ unexpected: [] })), /unrecognized shape/);
@@ -83,6 +104,12 @@ test('discovery validates its shape and deduplicates universe IDs', async () => 
 
 test('game requests use bounded batches of universe IDs', async () => {
   const queries = [];
-  await fetchGameStats(['1', '2', '3'], 2, async url => { queries.push(new URL(url).searchParams.get('universeIds')); return { data: [] }; });
+  const delays = [];
+  await fetchGameStats(['1', '2', '3'], 2, async url => { queries.push(new URL(url).searchParams.get('universeIds')); return { data: [] }; }, async delay => delays.push(delay));
   assert.deepEqual(queries, ['1,2', '3']);
+  assert.deepEqual(delays,[1000]);
+  const voteQueries = [];
+  await fetchGameVotes(['1','2','3'],2,async url => { voteQueries.push(new URL(url).searchParams.get('universeIds')); return {data:[]}; },async delay=>delays.push(delay));
+  assert.deepEqual(voteQueries,['1,2','3']);
+  assert.deepEqual(delays,[1000,1000]);
 });

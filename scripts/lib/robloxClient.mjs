@@ -23,7 +23,8 @@ export async function fetchJson(url, { fetcher = fetch, sleep = pause, attempts 
       ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
     // Stop rather than retry sooner than a long server-requested cooldown.
     if (retryMs > 60000) throw new Error(`Rate limited by ${new URL(url).hostname}; retry after ${retryAfter}.`);
-    const delay = Math.max(1000 * 2 ** attempt, Number.isFinite(retryMs) ? retryMs : 0);
+    const retryBaseMs = response.status === 429 ? 10000 : 1000;
+    const delay = Math.max(retryBaseMs * 2 ** attempt, Number.isFinite(retryMs) ? retryMs : 0);
     await response.body?.cancel();
     await sleep(delay + Math.floor(Math.random() * 250));
   }
@@ -52,9 +53,11 @@ export async function discoverGames(sortId, request = fetchJson) {
   return [...new Set(items.map(item => normalizeUniverseId(item.universeId)).filter(Boolean))];
 }
 
-export async function fetchGameStats(ids, batchSize = 50, request = fetchJson) {
+export async function fetchGameStats(ids, batchSize = 50, request = fetchJson, sleep = pause) {
   const games = [];
+  let batchIndex = 0;
   for (const batch of batches(ids, batchSize)) {
+    if (batchIndex++ > 0) await sleep(1000);
     const query = new URLSearchParams({ universeIds: batch.join(',') });
     const payload = await request(`https://games.roblox.com/v1/games?${query}`);
     if (!Array.isArray(payload.data)) throw new Error('Roblox game stats response has an unrecognized shape.');
@@ -63,9 +66,11 @@ export async function fetchGameStats(ids, batchSize = 50, request = fetchJson) {
   return games;
 }
 
-export async function fetchGameVotes(ids, batchSize = 50, request = fetchJson) {
+export async function fetchGameVotes(ids, batchSize = 50, request = fetchJson, sleep = pause) {
   const votes = new Map();
+  let batchIndex = 0;
   for (const batch of batches(ids, batchSize)) {
+    if (batchIndex++ > 0) await sleep(1000);
     const query = new URLSearchParams({ universeIds: batch.join(',') });
     const payload = await request(`https://games.roblox.com/v1/games/votes?${query}`);
     if (!Array.isArray(payload.data)) throw new Error('Roblox votes response has an unrecognized shape.');
