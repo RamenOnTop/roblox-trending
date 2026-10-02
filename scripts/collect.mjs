@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import { batches, discoverGames, fetchGameStats, fetchGameVotes, normalizeUniverseId } from './lib/robloxClient.mjs';
 import { buildDashboard, buildGameHistory } from './lib/trends.mjs';
 import { enrichGames } from './lib/enrichment.mjs';
+import { fileURLToPath } from 'node:url';
+import { databaseScope, loadCollectorState, saveCollectorState, historyPlan, readHistoryPages, mergeHistory } from './lib/collectorState.mjs';
 
 const config = JSON.parse(await readFile(new URL('../config/collection.json', import.meta.url), 'utf8'));
 const supabaseUrl = process.env.supabaseUrl;
@@ -11,6 +13,11 @@ if (Boolean(supabaseUrl) !== Boolean(supabaseServiceKey)) throw new Error('Confi
 const database = supabaseUrl ? createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false, autoRefreshToken: false } }) : null;
 const startedAt = new Date().toISOString();
 const collectionId = crypto.randomUUID();
+const statePath = fileURLToPath(new URL('../.collectorState/state.json.gz',import.meta.url));
+const scope = database ? databaseScope(`${supabaseUrl}|historyDays=${config.historyDays}`) : null;
+const loaded = database ? await loadCollectorState(statePath,scope) : {state:null,warning:null};
+const state = loaded.state;
+let enrichmentRowsDownloaded = 0;
 
 function checked(result, operation) {
   if (result.error) throw new Error(`${operation}: ${result.error.message}. Check the freshDataset.sql setup.`);
@@ -21,36 +28,20 @@ async function writeBatches(table, rows, conflict) {
   for (const batch of batches(rows, 100)) checked(await database.from(table).upsert(batch, { onConflict: conflict }), `Write ${table}`);
 }
 
-async function readHistory(ids, generatedAt, remainingBudget, recent = false) {
-  const column = recent ? 'capturedAt' : 'bucketAt';
-  const since = new Date(Date.parse(generatedAt) - (recent ? 1 : config.historyDays) * 86400000).toISOString();
-  const samples = [];
-  let cursor = null;
-  while (samples.length < remainingBudget) {
-    const pageSize = Math.min(1000, remainingBudget - samples.length);
-    let query = database.from(recent ? 'trendSnapshots' : 'trendHourlySamples')
-      .select(`gameId,${recent ? '' : 'bucketAt,'}capturedAt,activePlayers,visits,favorites,likeRatio`)
-      .in('gameId', ids).gte(column, since)
-      .order(column, { ascending: false }).order('gameId', { ascending: true }).limit(pageSize);
-    if (cursor) query = query.or(`${column}.lt.${cursor[column]},and(${column}.eq.${cursor[column]},gameId.gt.${cursor.gameId})`);
-    const rows = checked(await query, recent ? 'Read recent raw history' : 'Read hourly history');
-    if (!rows.length) break;
-    samples.push(...rows);
-    const next = rows.at(-1);
-    if (cursor && cursor[column] === next[column] && cursor.gameId === next.gameId) throw new Error('History cursor did not advance.');
-    cursor = next;
-    if (rows.length < pageSize) break;
-  }
-  return { samples, truncated: samples.length >= remainingBudget };
-}
-
 try {
-  let cachedEnrichment = [];
+  let cachedEnrichment = state?.enrichment ?? [];
   let enrichmentStorageReady = false;
   let enrichmentStorageWarning = null;
   if (database) {
-    const result = await database.from('trendEnrichment').select('gameId,payload').order('refreshedAt', {ascending:false}).limit(config.maxTrackedGames);
-    if (!result.error) { cachedEnrichment = result.data ?? []; enrichmentStorageReady = true; }
+    let query = database.from('trendEnrichment').select('gameId,payload').order('refreshedAt', {ascending:false}).limit(config.maxTrackedGames);
+    if (state) query = query.gt('refreshedAt',state.generatedAt);
+    const result = await query;
+    if (!result.error) {
+      enrichmentRowsDownloaded = result.data?.length ?? 0;
+      const merged = new Map(cachedEnrichment.map(row=>[row.gameId,row]));
+      for (const row of result.data ?? []) merged.set(row.gameId,row);
+      cachedEnrichment = [...merged.values()];enrichmentStorageReady = true;
+    }
     else enrichmentStorageWarning = `Enrichment cache unavailable (${result.error.code ?? 'unknown'}); run database/addEnrichment.sql.`;
   }
   const tracked = database ? checked(await database.from('trendGames').select('id').order('lastSeenAt', { ascending: false }).limit(config.maxTrackedGames), 'Read tracked games') : [];
@@ -95,36 +86,37 @@ try {
   }
   if (!games.length) throw new Error('No valid player-count observations were returned.');
   let history = { samples: [], truncated: false };
+  let checkpoint = null;
+  let historyRowsDownloaded = 0;
+  let historyJsonBytesDownloaded = 0;
   if (database) {
     await writeBatches('trendGames', games, 'id');
     await writeBatches('trendSnapshots', currentSamples, 'gameId,capturedAt');
     const bucketAt = new Date(Math.floor(Date.parse(generatedAt) / 3600000) * 3600000).toISOString();
     await writeBatches('trendHourlySamples', currentSamples.map(sample => ({ ...sample, bucketAt })), 'gameId,bucketAt');
-    // Request chunks keep PostgREST URLs bounded. Pagination uses both timestamp and ID.
-    for (const batch of batches(games.map(game => game.id), 100)) {
-      const recentBudget = config.maxHistoryRows - history.samples.length;
-      if (recentBudget <= 0) { history.truncated = true; break; }
-      const recent = await readHistory(batch, generatedAt, recentBudget, true);
-      history.samples.push(...recent.samples);
-      history.truncated ||= recent.truncated;
-      const remainingBudget = config.maxHistoryRows - history.samples.length;
-      if (remainingBudget <= 0) { history.truncated = true; break; }
-      const part = await readHistory(batch, generatedAt, remainingBudget);
-      history.samples.push(...part.samples);
-      history.truncated ||= part.truncated;
+    const validIds = games.map(game=>game.id);
+    const rawRows = [];const hourlyRows = [];
+    for (const plan of historyPlan(state,validIds,generatedAt,config.historyDays)) {
+      const part = await readHistoryPages(database,plan,{maxRows:config.maxHistoryRows-historyRowsDownloaded});
+      historyRowsDownloaded += part.rows.length;historyJsonBytesDownloaded += part.jsonBytes;
+      (plan.table === 'trendSnapshots' ? rawRows : hourlyRows).push(...part.rows);
     }
+    checkpoint = mergeHistory(state,[...rawRows,...currentSamples],[...hourlyRows,...currentSamples.map(sample=>({...sample,bucketAt}))],validIds,generatedAt,config.historyDays);
+    history.samples = [...checkpoint.rawSamples,...checkpoint.hourlySamples];
+    if (history.samples.length > config.maxHistoryRows) throw new Error('Merged history exceeds the checkpoint budget.');
   }
   const enriched = await enrichGames(games, cachedEnrichment, config, generatedAt);
   if (database && enrichmentStorageReady) {
     try { await writeBatches('trendEnrichment', enriched.rows, 'gameId'); }
     catch (error) { enrichmentStorageWarning = `Enrichment cache write failed: ${error.message}`; }
   }
-  const warnings = [discoveryWarning, votesWarning, enrichmentStorageWarning, ...enriched.warnings].filter(Boolean);
+  const warnings = [loaded.warning,discoveryWarning, votesWarning, enrichmentStorageWarning, ...enriched.warnings].filter(Boolean);
   if (database) checked(await database.from('collectionRuns').update({ completedAt: new Date().toISOString(), status: 'complete', collectedGames: games.length, warning: warnings.join('; ').slice(0,4000) || null }).eq('id', collectionId), 'Complete collection run');
   if (warnings.length) console.warn(warnings.join('\n'));
   const meta = { generatedAt, startedAt, collectionId, historySource: database ? 'Supabase' : 'currentSnapshot',
     gamesTracked: ids.length, gamesCollected: games.length, historyRows: history.samples.length,
     historyTruncated: history.truncated, trackingCapped: candidates.length > ids.length,
+    historyMode: database ? (state ? 'incremental' : 'bootstrap') : 'currentSnapshot',historyRowsDownloaded,historyJsonBytesDownloaded,enrichmentRowsDownloaded,
     discoveryWarning, votesWarning, enrichmentStorageReady, enrichmentWarnings: enriched.warnings,
     enrichmentStorageWarning, sampleScope: 'Tracked chart games, configured seeds, and cached recommendations; not all Roblox experiences.' };
   const dashboard = buildDashboard(enriched.games, [...currentSamples, ...history.samples], meta);
@@ -136,7 +128,13 @@ try {
   for (const [gameId, points] of buildGameHistory([...history.samples, ...currentSamples])) {
     if (normalizeUniverseId(gameId)) await writeFile(new URL(`${gameId}.json`, historyOutput),JSON.stringify({gameId,generatedAt,points}));
   }
-  console.log(JSON.stringify({ collected: games.length, tracked: ids.length, historySource: meta.historySource, historyRows: history.samples.length, generatedAt }));
+  if (checkpoint) {
+    const cached = new Map(cachedEnrichment.map(row=>[row.gameId,row]));
+    for (const row of enriched.rows) cached.set(row.gameId,row);
+    const validIds = new Set(games.map(game=>game.id));
+    await saveCollectorState(statePath,{scope,generatedAt,gameIds:[...validIds],...checkpoint,enrichment:[...cached.values()].filter(row=>validIds.has(row.gameId))});
+  }
+  console.log(JSON.stringify({ collected: games.length, tracked: ids.length, historySource: meta.historySource, historyRows: history.samples.length, historyMode:meta.historyMode,historyRowsDownloaded,historyJsonBytesDownloaded,enrichmentRowsDownloaded,generatedAt }));
 } catch (error) {
   if (database) await database.from('collectionRuns').update({ completedAt: new Date().toISOString(), status: 'failed', warning: error.message }).eq('id', collectionId);
   console.error(error.message);

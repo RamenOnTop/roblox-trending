@@ -4,7 +4,9 @@
   "batchSize": 50,
   "maxTrackedGames": 1000,
   "historyDays": 30,
-  "maxHistoryRows": 750000,
+  "maxHistoryRows": 1000000,
+  "rawRetentionDays": 7,
+  "hourlyRetentionDays": 35,
   "enrichmentGamesPerRun": 20,
   "enrichmentRefreshHours": 24,
   "enrichmentBudgetSeconds": 120

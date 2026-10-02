@@ -9,6 +9,7 @@
     "lint": "eslint",
     "ingest:loop": "node scripts/ingest-loop.mjs",
     "collect": "node scripts/collect.mjs",
+    "archive:history": "node scripts/archiveHistory.mjs",
     "build:pages": "node scripts/buildPages.mjs",
     "test:data": "node --test scripts/tests/*.test.mjs"
   },
@@ -20,6 +21,7 @@
     "react-dom": "19.2.3"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

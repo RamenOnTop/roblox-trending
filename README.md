@@ -45,7 +45,21 @@ Keep credentials out of source files, public environment variables, generated JS
 | trendHourlySamples | Latest observation per game per hour for compact dashboard history |
 | collectionRuns | Collection timing, success/failure, and warnings |
 
-Row-level security is enabled without public read/write policies. Only the server worker receives the database key. The published JSON contains public Roblox metadata and derived statistics. Raw history has no automatic deletion policy; monitor database growth and add retention/partitioning when measurements justify it.
+Row-level security is enabled without public read/write policies. Only the server worker receives the database key. The published JSON contains public Roblox metadata and derived statistics.
+
+### Lower bandwidth and preserve ML history
+
+The collector restores a compressed checkpoint from GitHub Actions cache. Known games fetch observations since the previous successful collection, with a one-hour overlap for late writes. Newly tracked games backfill recent raw observations and hourly history once. Hourly rows replace the previous observation in the same bucket; charts do not invent observations. Cached enrichment avoids downloading every game's full detail payload on each run. Checkpoints are bound to the database URL and history-window configuration; missing, corrupt or evicted caches rebuild from Supabase. A partial historical download cannot advance the checkpoint.
+
+Run **database/optimizeHistory.sql** once in the existing Supabase project's SQL Editor. This additive migration creates the archive ledger, incremental hourly index and server-only maintenance functions. Running the SQL itself does not delete history. The bandwidth optimization works before this migration; archive retention remains inactive until it is installed.
+
+With the migration installed, completed UTC days of raw observations are compressed into JSONL/GZIP assets in the **roblox-history** GitHub release. All original snapshot columns, including votes, visits, favorites and collection IDs, are retained. Each asset has a SHA-256 manifest. The worker uploads both files, downloads them from GitHub, checks their bytes and row counts, and asks PostgreSQL to confirm that the source has not changed before registering the archive or deleting anything. Failed archive maintenance leaves unverified rows in Supabase and does not stop the frontend deployment. Release assets contain public Roblox statistics and are publicly downloadable; credentials are excluded.
+
+Supabase retains at least seven completed days of raw snapshots plus the current UTC day, and at least 35 days of hourly samples. Older hourly rows are eligible for deletion only when the corresponding raw day has a verified archive and its raw snapshot is no longer present. The cache keeps recent raw chart observations and about 31 days of hourly history. `historyDays` describes dashboard coverage, not the lifetime of the ML dataset. The game tracking cap remains 1,000.
+
+**Keep the roblox-history release assets.** They hold the raw training history after pruning; Actions cache is disposable performance state, not the ML archive. If a historical day changes after archival, a new immutable asset is added and previous versions remain available. When assembling training data across versions, deduplicate by game ID and capture timestamp. Keep a separate copy of release archives for an independent backup. Deleted database pages are normally reused by PostgreSQL; pruning does not guarantee an immediate reduction in reported database size.
+
+Collection logs and published metadata include `historyMode`, `historyRowsDownloaded`, `historyJsonBytesDownloaded` and `enrichmentRowsDownloaded`. JSON byte counts describe decoded historical payloads, not exact billed egress. Compare warmed runs and monitor Supabase's actual storage/egress usage. These changes reduce repeated downloads and bound hot history; they do not guarantee every workload fits the free plan.
 
 ## Roblox request strategy
 
@@ -71,7 +85,7 @@ The chart is a sample of popular games, not a catalog of all Roblox games. Add s
 
 ## Local commands
 
-Run **npm ci**, **npm run test:data**, **npm run collect**, and **npm run build:pages**.
+Run **npm ci**, **npm run test:data**, **npm run collect**, and **npm run build:pages**. The tests include embedded PostgreSQL checks for archive retention and source-change protection. **npm run archive:history** requires the existing Supabase credentials plus `githubRepository` and `githubToken`; Actions configures these automatically.
 
 Collection makes real read-only requests to Roblox and writes ignored public/data/dashboard.json. If the supabaseUrl and supabaseServiceKey environment variables are present, it also writes to the configured fresh database. Avoid setting these variables unless that database is ready.
 

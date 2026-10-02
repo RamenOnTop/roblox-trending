@@ -41,6 +41,8 @@ yarn-error.log*
 next-env.d.ts
 .pagesBuild/
 public/data/
+.collectorState/
+.historyArchives/
 
 # local env files
 .env

@@ -28,11 +28,22 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:data
+      - name: Restore collector checkpoint
+        uses: actions/cache/restore@v5
+        with:
+          path: .collectorState
+          key: collectorState-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: collectorState-v1-
       - name: Collect public Roblox statistics
         run: npm run collect
         env:
           supabaseUrl: ${{ secrets.supabaseUrl }}
           supabaseServiceKey: ${{ secrets.supabaseServiceKey }}
+      - name: Save updated collector checkpoint
+        uses: actions/cache/save@v5
+        with:
+          path: .collectorState
+          key: collectorState-v1-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Configure Pages
         id: pages
         uses: actions/configure-pages@v5
@@ -55,3 +66,26 @@ jobs:
       - name: Deploy Pages
         id: deployment
         uses: actions/deploy-pages@v4
+  archive:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify ML archives and maintain recent database history
+        run: npm run archive:history
+        env:
+          supabaseUrl: ${{ secrets.supabaseUrl }}
+          supabaseServiceKey: ${{ secrets.supabaseServiceKey }}
+          githubRepository: ${{ github.repository }}
+          githubToken: ${{ github.token }}
