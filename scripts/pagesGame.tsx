@@ -51,7 +51,7 @@ export default function GamePage() {
         {game ? <>
           <div className="mt-5 flex items-center gap-4">
             {game.enrichment?.iconUrl ? <img src={game.enrichment.iconUrl} alt={`${game.name} icon`} width={72} height={72} className="h-18 w-18 shrink-0 rounded-xl" onError={event => {event.currentTarget.style.display = 'none';}} /> : null}
-            <h1 className="text-3xl font-bold">{game.name}</h1>
+            <h1 className="min-w-0 break-words text-3xl font-bold">{game.name}</h1>
           </div>
           <p className="mt-2 text-zinc-400">by {game.creator} · {[game.genreL1, game.genreL2].filter(Boolean).join(" / ")}</p>
           <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">

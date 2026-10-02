@@ -232,18 +232,18 @@ export default function Home() {
                   )}
                 </div>
 
-                <div className="mt-4 grid gap-3">
+                <div className="mt-4 grid min-w-0 gap-3">
                   {genres.map((G) => (
                     <div
                       key={G.key}
                       onClick={() => setSelectedKey(G.key)}
                       className={[
-                        "cursor-pointer rounded-2xl border bg-zinc-950 p-4",
+                        "min-w-0 cursor-pointer rounded-2xl border bg-zinc-950 p-4",
                         selectedKey === G.key ? "border-zinc-500" : "border-zinc-800",
                       ].join(" ")}
                     >
                       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
-                        <div className="min-w-0 flex-1">
+                        <div className="w-full min-w-0 flex-1 sm:w-auto">
                           <p className="text-base font-semibold">{G.key}</p>
 
                           <p className="text-sm text-zinc-400">
@@ -293,12 +293,12 @@ export default function Home() {
                             );
                           })() : null}
 
-                          <div className="mt-3 grid gap-2">
+                          <div className="mt-3 grid min-w-0 gap-2">
                             {G.topGames?.slice(0, 3).map((tg) => (
                               <Link
                                 key={tg.id}
                                 href={gameHref(tg.id)}
-                                className="block rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 hover:bg-zinc-800"
+                                className="block min-w-0 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 hover:bg-zinc-800"
                                 onClick={(e) => e.stopPropagation()} // so clicking a game doesn't also change selection
                               >
                                 <div className="flex items-center justify-between gap-3">
