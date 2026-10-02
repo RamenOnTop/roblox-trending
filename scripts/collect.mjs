@@ -2,6 +2,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { createClient } from '@supabase/supabase-js';
 import { batches, discoverGames, fetchGameStats, fetchGameVotes, normalizeUniverseId } from './lib/robloxClient.mjs';
 import { buildDashboard } from './lib/trends.mjs';
+import { enrichGames } from './lib/enrichment.mjs';
 
 const config = JSON.parse(await readFile(new URL('../config/collection.json', import.meta.url), 'utf8'));
 const supabaseUrl = process.env.supabaseUrl;
@@ -43,6 +44,14 @@ async function readHistory(ids, generatedAt, remainingBudget) {
 }
 
 try {
+  let cachedEnrichment = [];
+  let enrichmentStorageReady = false;
+  let enrichmentStorageWarning = null;
+  if (database) {
+    const result = await database.from('trendEnrichment').select('gameId,payload').order('refreshedAt', {ascending:false}).limit(config.maxTrackedGames);
+    if (!result.error) { cachedEnrichment = result.data ?? []; enrichmentStorageReady = true; }
+    else enrichmentStorageWarning = `Enrichment cache unavailable (${result.error.code ?? 'unknown'}); run database/addEnrichment.sql.`;
+  }
   const tracked = database ? checked(await database.from('trendGames').select('id').order('lastSeenAt', { ascending: false }).limit(config.maxTrackedGames), 'Read tracked games') : [];
   const seeds = (config.seedUniverseIds ?? []).map(normalizeUniverseId).filter(Boolean);
   let discovered = [];
@@ -52,7 +61,8 @@ try {
     discoveryWarning = error.message;
     console.warn(`Discovery unavailable; using saved and configured IDs. ${error.message}`);
   }
-  const candidates = [...new Set([...seeds, ...discovered, ...tracked.map(game => game.id)])];
+  const relatedIds = cachedEnrichment.flatMap(row => row.payload?.relatedGames ?? []).map(game => normalizeUniverseId(game.id)).filter(Boolean);
+  const candidates = [...new Set([...seeds, ...discovered, ...tracked.map(game => game.id), ...relatedIds])];
   const ids = candidates.slice(0, config.maxTrackedGames);
   if (!ids.length) throw new Error('No universe IDs are available. Restore discovery or add seedUniverseIds to config/collection.json.');
   if (database) checked(await database.from('collectionRuns').insert({ id: collectionId, startedAt, status: 'running', requestedGames: ids.length }), 'Start collection run');
@@ -97,13 +107,21 @@ try {
       history.samples.push(...part.samples);
       history.truncated ||= part.truncated;
     }
-    checked(await database.from('collectionRuns').update({ completedAt: generatedAt, status: 'complete', collectedGames: games.length, warning: [discoveryWarning, votesWarning].filter(Boolean).join('; ') || null }).eq('id', collectionId), 'Complete collection run');
   }
+  const enriched = await enrichGames(games, cachedEnrichment, config, generatedAt);
+  if (database && enrichmentStorageReady) {
+    try { await writeBatches('trendEnrichment', enriched.rows, 'gameId'); }
+    catch (error) { enrichmentStorageWarning = `Enrichment cache write failed: ${error.message}`; }
+  }
+  const warnings = [discoveryWarning, votesWarning, enrichmentStorageWarning, ...enriched.warnings].filter(Boolean);
+  if (database) checked(await database.from('collectionRuns').update({ completedAt: new Date().toISOString(), status: 'complete', collectedGames: games.length, warning: warnings.join('; ').slice(0,4000) || null }).eq('id', collectionId), 'Complete collection run');
+  if (warnings.length) console.warn(warnings.join('\n'));
   const meta = { generatedAt, startedAt, collectionId, historySource: database ? 'Supabase' : 'currentSnapshot',
     gamesTracked: ids.length, gamesCollected: games.length, historyRows: history.samples.length,
     historyTruncated: history.truncated, trackingCapped: candidates.length > ids.length,
-    discoveryWarning, votesWarning, sampleScope: 'Tracked chart games and configured seeds; not all Roblox experiences.' };
-  const dashboard = buildDashboard(games, [...currentSamples, ...history.samples], meta);
+    discoveryWarning, votesWarning, enrichmentStorageReady, enrichmentWarnings: enriched.warnings,
+    enrichmentStorageWarning, sampleScope: 'Tracked chart games, configured seeds, and cached recommendations; not all Roblox experiences.' };
+  const dashboard = buildDashboard(enriched.games, [...currentSamples, ...history.samples], meta);
   const output = new URL('../public/data/', import.meta.url);
   await mkdir(output, { recursive: true });
   await writeFile(new URL('dashboard.json', output), JSON.stringify(dashboard));

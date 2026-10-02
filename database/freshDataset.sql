@@ -67,3 +67,13 @@ alter table public."trendHourlySamples" enable row level security;
 -- Pages receives only generated public Roblox statistics. Browsers get no database secret.
 revoke all on public."collectionRuns", public."trendGames", public."trendSnapshots", public."trendHourlySamples" from anon, authenticated;
 grant select, insert, update on public."collectionRuns", public."trendGames", public."trendSnapshots", public."trendHourlySamples" to service_role;
+
+-- Public API details cache; apply addEnrichment.sql instead for an existing database.
+create table if not exists public."trendEnrichment" (
+  "gameId" text primary key references public."trendGames"(id),
+  payload jsonb not null default '{}'::jsonb check (jsonb_typeof(payload) = 'object'),
+  "refreshedAt" timestamptz not null
+);
+alter table public."trendEnrichment" enable row level security;
+revoke all on public."trendEnrichment" from public, anon, authenticated;
+grant select, insert, update on public."trendEnrichment" to service_role;

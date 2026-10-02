@@ -34,6 +34,7 @@ type TrendingGenre = {
     id: string;
     name: string;
     creator: string;
+    iconUrl?: string | null;
     activePlayersNow: number;
     rWindowPct: number | null;
     r24hPct: number;
@@ -301,7 +302,8 @@ export default function Home() {
                                 onClick={(e) => e.stopPropagation()} // so clicking a game doesn't also change selection
                               >
                                 <div className="flex items-center justify-between gap-3">
-                                  <div className="min-w-0">
+                                  {tg.iconUrl ? <img src={tg.iconUrl} alt="" width={40} height={40} loading="lazy" className="h-10 w-10 shrink-0 rounded-lg" onError={event => {event.currentTarget.style.display = 'none';}} /> : null}
+                                  <div className="min-w-0 flex-1">
                                     <p className="truncate text-sm font-medium">{tg.name}</p>
                                     <p className="truncate text-xs text-zinc-400">by {tg.creator}</p>
                                   </div>

@@ -133,7 +133,7 @@ export function buildDashboard(games, snapshots, metadata) {
         leaderGrowthMedian: median(measured.filter(game => game.activePlayersNow >= 100000).map(game => game.rWindowPct)),
         breakoutGrowthMedian: median(measured.filter(game => game.activePlayersNow < 50000).map(game => game.rWindowPct)),
         breakoutsCount: measured.filter(game => game.activePlayersNow < 75000 && game.rWindowPct >= 8 && game.growthAbsWindow >= 2000).length,
-        topGames: group.games.slice(0, 5).map(game => ({ id: game.id, name: game.name, creator: game.creator, activePlayersNow: game.activePlayersNow, rWindowPct: game.rWindowPct, r24hPct: game.r24hPct })),
+        topGames: group.games.slice(0, 5).map(game => ({ id: game.id, name: game.name, creator: game.creator, iconUrl: game.enrichment?.iconUrl ?? null, activePlayersNow: game.activePlayersNow, rWindowPct: game.rWindowPct, r24hPct: game.r24hPct })),
       };
     });
     allGenres.sort((left, right) => right.trendScore - left.trendScore || right.medianActivePlayers - left.medianActivePlayers);
@@ -142,5 +142,5 @@ export function buildDashboard(games, snapshots, metadata) {
     ranges[windowHours] = { genres, series };
   }
   const details = games.map(game => ({ ...game, activePlayers: byGame.get(game.id)?.[0]?.activePlayers ?? null }));
-  return { schemaVersion: 1, meta: metadata, ranges, games: details };
+  return { schemaVersion: 2, meta: metadata, ranges, games: details };
 }

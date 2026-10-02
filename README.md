@@ -16,6 +16,16 @@ Without database secrets, deployment shows a current snapshot and explicitly rep
 
 ### Connect a fresh Supabase dataset
 
+For an existing dataset, run **database/addEnrichment.sql** once in Supabase SQL Editor. This additive migration creates `trendEnrichment` and preserves all collected games and history. Do not rerun the destructive reset script. Existing Actions secrets continue to work.
+
+The collector requests batched game icons and up to three promotional thumbnails per game. Badge and recommendation details refresh for up to 20 games per run, rotating the oldest checks first with a 24-hour refresh interval and a 120-second enrichment budget. Badge lists contain at most 10 entries and indicate when more pages exist. Award counts are badge statistics, not unique players or retention. User-owned games also receive a bounded public creator-games list; group-owned portfolios are not queried through the user endpoint.
+
+`trendEnrichment` stores one row per game (`gameId`, JSONB `payload`, `refreshedAt`). Payload includes image URLs, badge samples and award counts, recommendations, user creator-games lists, and per-feature collection timestamps. It caches current details; historical player observations remain in the snapshot tables. Recommendations in the cache add candidates to the next collection within the existing tracking cap. They are Roblox recommendations, not our own similarity model.
+
+Optional enrichment errors preserve cached values and allow core stats collection to succeed. Until the migration is applied, images and a limited detail sample can appear on Pages, but details cannot be cached or rotated across runs. Public API requests run in GitHub Actions; the browser reads the generated dataset without database credentials. Private Analytics Query API calls are not enabled: they require an experience-scoped Roblox API key and authorization.
+
+References: [Thumbnails](https://create.roblox.com/docs/cloud/reference/domains/thumbnails), [Badges](https://create.roblox.com/docs/cloud/reference/domains/badges), [Games and recommendations](https://create.roblox.com/docs/cloud/reference/domains/games), [Analytics permissions](https://create.roblox.com/docs/cloud/guides/analytics).
+
 1. Run [database/freshDataset.sql](database/freshDataset.sql) in the fresh project's SQL Editor. It creates new tables; it does not wipe existing data.
 2. Add two repository Actions secrets under Settings → Secrets and variables → Actions:
    - **supabaseUrl**: the project URL.
