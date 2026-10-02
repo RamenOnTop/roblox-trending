@@ -1,5 +1,9 @@
 # Roblox Trends
 
+The frontend now offers a dark research dashboard with selectable game and genre charts, search, genre filters, sorting, and a browser-local watchlist. The watchlist does not require a login and does not sync across devices. Game detail links use `/game/?id=...` in both local and Pages builds. Run `npm run collect` to generate the local frontend dataset before `npm run dev`; the original API routes remain available independently.
+
+Recent charts include raw observations from the last 24 hours, together with the existing 30-day hourly history, within the configured history row budget. The collector exports individual game history files under `public/data/games/` so selecting a game does not download every game's full history. Table sparklines use a small set of real observations; growth is the actual percentage change in counts across the available window, and zero baselines remain unavailable. No database schema changes are required for this frontend update.
+
 A Next.js dashboard for exploring Roblox genre momentum. GitHub Pages serves the static frontend; GitHub Actions collects public Roblox statistics and publishes the dashboard dataset. Supabase is optional for the first live snapshot and required for durable history, growth comparisons, and future ML training.
 
 ## GitHub Pages and Actions

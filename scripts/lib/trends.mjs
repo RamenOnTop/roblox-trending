@@ -141,6 +141,33 @@ export function buildDashboard(games, snapshots, metadata) {
     const series = Object.fromEntries(genres.map(genre => [genre.key, genreSeries(byGenre.get(genre.key).samples, windowHours, nowMs)]));
     ranges[windowHours] = { genres, series };
   }
-  const details = games.map(game => ({ ...game, activePlayers: byGame.get(game.id)?.[0]?.activePlayers ?? null }));
-  return { schemaVersion: 2, meta: metadata, ranges, games: details };
+  const details = games.map(game => {
+    const samples = byGame.get(game.id) ?? [];
+    const current = samples[0];
+    const metrics = Object.fromEntries(rangeHours.map(hours => {
+      const window = samples.filter(sample => Date.parse(sample.capturedAt) >= nowMs - hours * 3600000);
+      const score = window.length ? scoreGame(window, hours) : null;
+      const points = window.slice().reverse();
+      const sparkline = points.filter((_, index) => index === points.length - 1 || index % Math.max(1, Math.ceil(points.length / 15)) === 0)
+        .map(sample => ({time:Math.floor(Date.parse(sample.capturedAt) / 1000),value:sample.activePlayers}));
+      const first = points[0];
+      // Display actual count growth; smoothed/clamped returns remain internal to scoring.
+      const growthPct = first && window.length > 1 && first.activePlayers > 0 ? (current.activePlayers - first.activePlayers) / first.activePlayers * 100 : null;
+      return [hours, {growthPct, hoursUsed:score?.windowHoursUsed ?? 0, confidence:score?.confidence ?? 0, score:score?.score ?? 0, sparkline}];
+    }));
+    return {...game,activePlayers:current?.activePlayers ?? null,visits:current?.visits ?? null,favorites:current?.favorites ?? null,likeRatio:current?.likeRatio ?? null,metrics};
+  });
+  return { schemaVersion: 3, meta: metadata, ranges, games: details };
+}
+
+export function buildGameHistory(snapshots) {
+  const byGame = new Map();
+  for (const sample of snapshots) {
+    const time = Math.floor(Date.parse(sample.capturedAt) / 1000);
+    if (!Number.isFinite(time) || !finite(sample.activePlayers)) continue;
+    const points = byGame.get(sample.gameId) ?? new Map();
+    points.set(time, {time,value:sample.activePlayers});
+    byGame.set(sample.gameId,points);
+  }
+  return new Map([...byGame].map(([id,points])=>[id,[...points.values()].sort((left,right)=>left.time-right.time)]));
 }

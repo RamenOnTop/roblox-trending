@@ -1,32 +1,8 @@
-export default function AboutPage() {
-  return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 px-6 py-10">
-      <div className="mx-auto max-w-3xl">
-        <h1 className="text-3xl font-bold">About / Method</h1>
-        <p className="mt-3 text-zinc-400">
-          This dashboard compares a tracked sample of Roblox experiences grouped by their Roblox
-          genres. It helps you explore audience size and momentum.
-        </p>
-
-        <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <h2 className="text-lg font-semibold">Signals</h2>
-          <ul className="mt-3 list-disc space-y-2 pl-6 text-zinc-300">
-            <li>Active players and growth rate over time</li>
-            <li>Like ratio / favorites velocity</li>
-            <li>Visits velocity (acceleration matters)</li>
-            <li>Roblox genres, with growth comparisons over the available history</li>
-          </ul>
-        </div>
-
-        <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <h2 className="text-lg font-semibold">Current state</h2>
-          <p className="mt-2 text-zinc-400">
-            Current rankings use formulas, not machine learning predictions. A fresh collection
-            starts with current counts; growth and confidence improve as observations accumulate.
-            Competition figures describe only the games we track.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
+import {Brand,Icon,PageLink as Link} from '../components/TrendsUi';
+export default function AboutPage(){return <main className="detailShell"><header className="detailHeader"><Link href="/" aria-label="Roblox Trends home"><Brand/></Link><Link href="/" className="backLink"><Icon name="back" size={15}/> Back to overview</Link></header><article className="methodContent"><p className="eyebrow">A LITTLE CONTEXT GOES A LONG WAY</p><h1>Understand the signals.</h1><p className="methodIntro">Roblox Trends is a research space for curious creators. We collect public player counts and game details, then help you follow the experiences and genres getting attention.</p>
+<section className="panel methodCard"><h2>A snapshot, about every 30 minutes.</h2><p>GitHub Actions collects public Roblox statistics and publishes the dashboard. Counts describe the latest successful collection, rather than a live stream. Collection timing can vary.</p><p>We follow chart games, configured games, and a bounded sample of recommendations. The totals describe our tracked sample, which does not include every Roblox experience.</p></section>
+<section className="panel methodCard"><h2>What the numbers mean</h2><ul><li><strong>Players:</strong> concurrent players reported by Roblox at collection time.</li><li><strong>Change:</strong> the percentage change between recorded player counts across the available history in your selected range. Each game shows how much history was measured.</li><li><strong>Rating:</strong> positive votes divided by total positive and negative votes.</li><li><strong>Genre lens:</strong> the median player count across tracked games in a genre. Genre change uses the existing momentum calculation, which smooths smaller counts.</li><li><strong>Badges:</strong> a sample of badge details and awards. Awards cannot be treated as unique players, retention, or revenue.</li></ul></section>
+<section className="panel methodCard"><h2>Let the history grow.</h2><p>A new game starts with one observation. We show missing history explicitly, and label partial windows instead of pretending a few hours represent a full month. Longer ranges become useful as we collect more observations.</p><p>Charts show recorded observations. No generated activity is added to make a chart look busier.</p></section>
+<section className="panel methodCard"><h2>Your watchlist stays with you.</h2><p>Star games to save a shortlist in this browser. No account is required. Your list is not synced to other devices and can be lost if you clear browser storage.</p></section>
+<section className="panel methodCard"><h2>Useful context, growing over time.</h2><p>Images, badge details, and recommendations come from Roblox’s public APIs. Extra details refresh in limited batches and display their collection time. Recommendations are supplied by Roblox.</p><p>Current momentum scores use formulas. Machine learning forecasts are not available yet. Private creator analytics requires permission for the relevant experience.</p></section>
+<footer className="dashboardFooter"><span>Built to help you explore, compare, and get inspired.</span><Link href="/">Back to research <Icon name="arrow" size={13}/></Link></footer></article></main>;}

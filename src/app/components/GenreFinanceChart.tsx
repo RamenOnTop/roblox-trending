@@ -1,81 +1,38 @@
 "use client";
+import {useEffect,useRef,useState} from 'react';
+import {AreaSeries,ColorType,CrosshairMode,createChart,type UTCTimestamp} from 'lightweight-charts';
+import type {Point} from '../lib/dashboardData';
+import {number} from '../lib/display';
 
-import { useEffect, useMemo, useRef } from "react";
-import {
-  AreaSeries,
-  ColorType,
-  createChart,
-  type UTCTimestamp,
-} from "lightweight-charts";
-
-type Point = { time: UTCTimestamp; value: number };
-
-export default function GenreFinanceChart({ title, data }: { title: string; data: Point[] }) {
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  const change = useMemo(() => {
-    if (data.length < 2) return { abs: 0, pct: null, last: data[0]?.value ?? null };
-    const first = data[0]!.value;
-    const last = data[data.length - 1]!.value;
-    const abs = last - first;
-    const pct = first === 0 ? 0 : (abs / first) * 100;
-    return { abs, pct, last };
-  }, [data]);
-
-  useEffect(() => {
-    if (!ref.current) return;
-
-    const chart = createChart(ref.current, {
-      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#a1a1aa" },
-      grid: { vertLines: { visible: false }, horzLines: { visible: false } },
-      rightPriceScale: { borderVisible: false },
-      timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false },
-      crosshair: { mode: 1 },
-      height: 260,
+export default function GenreFinanceChart({data,loading=false,label='Players',height=280}:{data:Point[];loading?:boolean;label?:string;height?:number}) {
+  const ref=useRef<HTMLDivElement>(null);
+  const [hover,setHover]=useState<{value:number;time:string}|null>(null);
+  useEffect(()=>{
+    if(!ref.current||data.length<2)return;
+    const chart=createChart(ref.current,{
+      width:ref.current.clientWidth,height,
+      layout:{background:{type:ColorType.Solid,color:'transparent'},textColor:'#76837c',fontFamily:'Arial',fontSize:11},
+      grid:{vertLines:{visible:false},horzLines:{color:'#1e2722',style:2}},
+      rightPriceScale:{borderVisible:false,scaleMargins:{top:0.12,bottom:0.12}},
+      timeScale:{borderVisible:false,timeVisible:true,secondsVisible:false},
+      crosshair:{mode:CrosshairMode.Normal,vertLine:{color:'#6c7b70',labelBackgroundColor:'#314435'},horzLine:{color:'#6c7b70',labelBackgroundColor:'#314435'}},
+      handleScroll:false,handleScale:false,
     });
-
-    const series = chart.addSeries(AreaSeries, {
-      lineWidth: 2,
-      topColor: "rgba(59,130,246,0.20)",
-      bottomColor: "rgba(59,130,246,0.00)",
-      lineColor: "rgba(59,130,246,0.90)",
-    });
-
-    series.setData(data);
-
+    const falling=data.at(-1)!.value<data[0].value;
+    const series=chart.addSeries(AreaSeries,{lineColor:falling?'#eea296':'#b6ef8b',topColor:falling?'rgba(238,162,150,.12)':'rgba(182,239,139,.15)',bottomColor:'rgba(182,239,139,0)',lineWidth:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerRadius:5,priceFormat:{type:'custom',formatter:(value:number)=>number(value)},pointMarkersVisible:data.length===1});
+    series.setData(data.map(point=>({...point,time:point.time as UTCTimestamp})));
     chart.timeScale().fitContent();
-
-    const ro = new ResizeObserver(() => {
-      if (!ref.current) return;
-      chart.applyOptions({ width: ref.current.clientWidth });
+    chart.subscribeCrosshairMove(param=>{
+      const observation=param.seriesData.get(series);
+      if(!observation||!('value' in observation)||typeof param.time!=='number'){setHover(null);return;}
+      setHover({value:observation.value,time:new Date(param.time*1000).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'})});
     });
-    ro.observe(ref.current);
-
-    return () => {
-      ro.disconnect();
-      chart.remove();
-    };
-  }, [data]);
-
-  const pctCls = (change.pct ?? 0) >= 0 ? "text-green-400" : "text-red-400";
-
-  return (
-    <div className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <p className="text-sm text-zinc-400">Genre</p>
-          <p className="text-lg font-semibold">{title}</p>
-        </div>
-        <div className="text-right">
-          <p className="text-sm text-zinc-400">Now</p>
-          <p className="text-xl font-bold">{change.last == null ? "—" : Math.round(change.last).toLocaleString()}</p>
-          <p className={`text-sm ${pctCls}`}>
-            {change.pct == null ? "More history needed" : `${change.pct >= 0 ? "+" : ""}${change.pct.toFixed(1)}%`}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-3" ref={ref} />
-    </div>
-  );
+    const observer=new ResizeObserver(()=>{if(ref.current)chart.applyOptions({width:ref.current.clientWidth});});observer.observe(ref.current);
+    return()=>{observer.disconnect();chart.remove();};
+  },[data,height]);
+  return <div className="chartSurface" role="img" aria-label={`${label} history chart with ${data.length} observations`}>
+    <div className="chartHover">{hover?<><strong>{number(hover.value)}</strong> {label.toLowerCase()} <span>{hover.time}</span></>:<span>{data.length>=2?'Collected observations · Chart axis in UTC':''}</span>}</div>
+    <div ref={ref} style={{height}}/>
+    {loading?<div className="chartOverlay"><span className="loadingDot"/> Loading observations…</div>:data.length<2?<div className="chartOverlay"><svg width="48" height="32" viewBox="0 0 48 32" aria-hidden="true"><path d="m2 27 11-8 9 3 10-15 14-5" stroke="#b6ef8b" strokeWidth="2" fill="none" strokeLinecap="round" strokeDasharray="3 5"/></svg><strong>{data.length?'A trend starts with time.':'History is on its way.'}</strong><span>{data.length?'First observation recorded. More collections will reveal the curve.':'New observations appear after the next collection.'}</span></div>:null}
+  </div>;
 }

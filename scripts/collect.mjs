@@ -1,7 +1,7 @@
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { createClient } from '@supabase/supabase-js';
 import { batches, discoverGames, fetchGameStats, fetchGameVotes, normalizeUniverseId } from './lib/robloxClient.mjs';
-import { buildDashboard } from './lib/trends.mjs';
+import { buildDashboard, buildGameHistory } from './lib/trends.mjs';
 import { enrichGames } from './lib/enrichment.mjs';
 
 const config = JSON.parse(await readFile(new URL('../config/collection.json', import.meta.url), 'utf8'));
@@ -21,22 +21,23 @@ async function writeBatches(table, rows, conflict) {
   for (const batch of batches(rows, 100)) checked(await database.from(table).upsert(batch, { onConflict: conflict }), `Write ${table}`);
 }
 
-async function readHistory(ids, generatedAt, remainingBudget) {
-  const since = new Date(Date.parse(generatedAt) - config.historyDays * 86400000).toISOString();
+async function readHistory(ids, generatedAt, remainingBudget, recent = false) {
+  const column = recent ? 'capturedAt' : 'bucketAt';
+  const since = new Date(Date.parse(generatedAt) - (recent ? 1 : config.historyDays) * 86400000).toISOString();
   const samples = [];
   let cursor = null;
   while (samples.length < remainingBudget) {
     const pageSize = Math.min(1000, remainingBudget - samples.length);
-    let query = database.from('trendHourlySamples')
-      .select('gameId,bucketAt,capturedAt,activePlayers,visits,favorites,likeRatio')
-      .in('gameId', ids).gte('bucketAt', since)
-      .order('bucketAt', { ascending: false }).order('gameId', { ascending: true }).limit(pageSize);
-    if (cursor) query = query.or(`bucketAt.lt.${cursor.bucketAt},and(bucketAt.eq.${cursor.bucketAt},gameId.gt.${cursor.gameId})`);
-    const rows = checked(await query, 'Read hourly history');
+    let query = database.from(recent ? 'trendSnapshots' : 'trendHourlySamples')
+      .select(`gameId,${recent ? '' : 'bucketAt,'}capturedAt,activePlayers,visits,favorites,likeRatio`)
+      .in('gameId', ids).gte(column, since)
+      .order(column, { ascending: false }).order('gameId', { ascending: true }).limit(pageSize);
+    if (cursor) query = query.or(`${column}.lt.${cursor[column]},and(${column}.eq.${cursor[column]},gameId.gt.${cursor.gameId})`);
+    const rows = checked(await query, recent ? 'Read recent raw history' : 'Read hourly history');
     if (!rows.length) break;
     samples.push(...rows);
     const next = rows.at(-1);
-    if (cursor && cursor.bucketAt === next.bucketAt && cursor.gameId === next.gameId) throw new Error('History cursor did not advance.');
+    if (cursor && cursor[column] === next[column] && cursor.gameId === next.gameId) throw new Error('History cursor did not advance.');
     cursor = next;
     if (rows.length < pageSize) break;
   }
@@ -101,6 +102,11 @@ try {
     await writeBatches('trendHourlySamples', currentSamples.map(sample => ({ ...sample, bucketAt })), 'gameId,bucketAt');
     // Request chunks keep PostgREST URLs bounded. Pagination uses both timestamp and ID.
     for (const batch of batches(games.map(game => game.id), 100)) {
+      const recentBudget = config.maxHistoryRows - history.samples.length;
+      if (recentBudget <= 0) { history.truncated = true; break; }
+      const recent = await readHistory(batch, generatedAt, recentBudget, true);
+      history.samples.push(...recent.samples);
+      history.truncated ||= recent.truncated;
       const remainingBudget = config.maxHistoryRows - history.samples.length;
       if (remainingBudget <= 0) { history.truncated = true; break; }
       const part = await readHistory(batch, generatedAt, remainingBudget);
@@ -125,6 +131,11 @@ try {
   const output = new URL('../public/data/', import.meta.url);
   await mkdir(output, { recursive: true });
   await writeFile(new URL('dashboard.json', output), JSON.stringify(dashboard));
+  const historyOutput = new URL('games/', output);
+  await mkdir(historyOutput, {recursive:true});
+  for (const [gameId, points] of buildGameHistory([...history.samples, ...currentSamples])) {
+    if (normalizeUniverseId(gameId)) await writeFile(new URL(`${gameId}.json`, historyOutput),JSON.stringify({gameId,generatedAt,points}));
+  }
   console.log(JSON.stringify({ collected: games.length, tracked: ids.length, historySource: meta.historySource, historyRows: history.samples.length, generatedAt }));
 } catch (error) {
   if (database) await database.from('collectionRuns').update({ completedAt: new Date().toISOString(), status: 'failed', warning: error.message }).eq('id', collectionId);
