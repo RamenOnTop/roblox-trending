@@ -1,0 +1,47 @@
+name: Learn and evaluate player forecasts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: robloxForecastExperiment
+  cancel-in-progress: false
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: 2
+      OPENBLAS_NUM_THREADS: 2
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: npm ci --ignore-scripts
+      - run: python -m pip install -r machineLearning/requirements.txt
+      - run: node --test scripts/tests/trainingExport.test.mjs
+      - run: python -m unittest discover -s machineLearning -p 'test*.py'
+      - name: Export recent raw observations without database writes
+        run: node scripts/exportTraining.mjs
+        env:
+          supabaseUrl: ${{ secrets.supabaseUrl }}
+          supabaseServiceKey: ${{ secrets.supabaseServiceKey }}
+      - name: Build examples, compare models, and explain results
+        run: python machineLearning/forecastExperiment.py
+      - name: Save learning report and reproducible experiment
+        uses: actions/upload-artifact@v4
+        with:
+          name: forecastExperiment-${{ github.run_id }}
+          path: machineLearning/output/
+          retention-days: 14

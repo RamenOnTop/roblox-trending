@@ -101,4 +101,4 @@ For a local export with the repository path, set pagesBasePath to /roblox-trendi
 
 **npm run dev** retains the original Next.js server mode and its existing API routes/schema. The GitHub Pages collector uses the fresh schema independently; connecting the old development API routes to that schema is a separate migration.
 
-Current trend/opportunity scores remain formulas. ML predictions are not implemented. Fresh history must accumulate before meaningful multi-day comparisons or training can begin.
+Current trend/opportunity scores remain formulas; no ML forecasts are published to the dashboard. The manual **Learn and evaluate player forecasts** workflow exports recent raw observations and compares persistence, a linear model and boosted trees using chronological validation and test periods. Its reports, examples and model are saved as downloadable experiment artifacts. Follow [the ML walkthrough](machineLearning/WALKTHROUGH.md) to run and understand each stage. These initial experiments do not establish prediction accuracy across weeks or unseen games.

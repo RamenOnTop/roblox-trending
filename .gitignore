@@ -43,6 +43,9 @@ next-env.d.ts
 public/data/
 .collectorState/
 .historyArchives/
+machineLearning/.venv/
+machineLearning/output/
+machineLearning/__pycache__/
 
 # local env files
 .env

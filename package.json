@@ -10,6 +10,7 @@
     "ingest:loop": "node scripts/ingest-loop.mjs",
     "collect": "node scripts/collect.mjs",
     "archive:history": "node scripts/archiveHistory.mjs",
+    "ml:export": "node scripts/exportTraining.mjs",
     "build:pages": "node scripts/buildPages.mjs",
     "test:data": "node --test scripts/tests/*.test.mjs"
   },

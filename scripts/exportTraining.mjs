@@ -1,0 +1,20 @@
+import {createClient} from '@supabase/supabase-js';
+import {mkdir, writeFile, rename} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import {readTrainingSnapshots} from './lib/trainingExport.mjs';
+
+const supabaseUrl = process.env.supabaseUrl;
+const supabaseServiceKey = process.env.supabaseServiceKey;
+if (!supabaseUrl || !supabaseServiceKey) throw new Error('Both existing Supabase secrets are required for the training export.');
+const database = createClient(supabaseUrl, supabaseServiceKey, {auth:{persistSession:false,autoRefreshToken:false}});
+const until = new Date().toISOString();
+const since = new Date(Date.parse(until)-7*86400000).toISOString();
+const rows = await readTrainingSnapshots(database,{since,until,maxRows:500000});
+if (!rows.length) throw new Error('No raw observations are available; training export stopped.');
+const directory = new URL('../machineLearning/output/',import.meta.url);
+await mkdir(directory,{recursive:true});
+const target = fileURLToPath(new URL('observations.jsonl',directory));
+await writeFile(target+'.tmp',rows.map(row=>JSON.stringify(row)).join('\n')+'\n');
+await rename(target+'.tmp',target);
+await writeFile(new URL('export.json',directory),JSON.stringify({schemaVersion:1,since,until,rows:rows.length,source:'Supabase trendSnapshots',fields:['gameId','capturedAt','activePlayers']},null,2));
+console.log(`Exported ${rows.length} raw observations for a seven-day experiment. No database writes.`);
