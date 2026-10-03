@@ -12,9 +12,17 @@ Repository: https://github.com/RamenOnTop/roblox-trending
 
 Expected site: https://ramenontop.github.io/roblox-trending/
 
-In repository Settings → Pages, choose **GitHub Actions** as the source. The collection and deployment workflow runs on pushes to main, on manual dispatch, and around minutes 13 and 43 of each hour. GitHub's scheduler can delay or skip runs; timestamps represent actual collection times. Public-repository schedules can be disabled after 60 days without repository activity. The overview checks for published updates every minute while visible and when returning to the tab, preserving the selected game. Refreshing the page does not collect new Roblox data; collection still runs in Actions.
+In repository Settings → Pages, choose **GitHub Actions** as the source. Supabase Cron triggers the collection and deployment workflow at minutes 13 and 43 of each hour. Pushes to main and manual dispatch also run it. Timestamps represent actual collection times; runner queues and upstream failures can delay updates. The overview checks for published updates every minute while visible and when returning to the tab, preserving the selected game. Refreshing the page does not collect new Roblox data; collection still runs in Actions.
 
 The separate check workflow runs collector tests and a static production build on pull requests and pushes. Checks do not access Supabase or Roblox.
+
+### Supabase collection timer
+
+`database/scheduleCollection.sql` installs the Supabase Cron timer that triggers the existing Actions workflow at minutes 13 and 43. It requires a fine-grained GitHub token scoped only to `RamenOnTop/roblox-trending`, with Actions read and write, saved in Supabase Vault as `robloxWorkflowToken`. The current scheduler token expires December 31, 2026; renew it in GitHub and update the Vault entry before expiry. Save the credential through Vault; do not paste it into source control, chat, or a saved SQL snippet. The setup refuses to activate without the secret.
+
+The administrator-only dispatcher uses a fixed GitHub destination and reads its credential at runtime. A recent running collection suppresses duplicate requests, while records older than the 25-minute build timeout do not prevent recovery. Re-running setup updates the existing timer by name. Check the returned request ID in `net._http_response`, then verify the Actions run and live dashboard timestamp: cron success alone only means an HTTP request was queued, not that GitHub accepted it or collection succeeded.
+
+The workflow retains push, manual dispatch and concurrency protection; its native GitHub schedule is removed after verifying the Supabase trigger. Pause the Supabase job with `cron.alter_job` as shown in the SQL file. A paused Supabase project, expired token, GitHub runner issue, or Roblox failure can still interrupt collection; inspect the Cron history, HTTP responses and Actions logs. Clean up old Cron run history periodically because Supabase does not remove it automatically.
 
 Without database secrets, deployment shows a current snapshot and explicitly reports that historical comparisons are unavailable. Each deployment replaces that snapshot; GitHub Pages is not a historical database. Missing observations are not converted to zero-player counts. A failed collection prevents deployment, preserving the previously published site.
 
