@@ -262,8 +262,10 @@ def main():
     table = "| Method | Validation normalized error | Test normalized error | Test MAE (players) |\n| --- | ---: | ---: | ---: |\n"
     for name in candidates:
         table += f"| {name} | {validationScores[name]['macroNormalizedMaePct']:.2f}% | {testScores[name]['macroNormalizedMaePct']:.2f}% | {testScores[name]['maePlayers']:.1f} |\n"
-    interpretation = (f"Selected model's test error is {improvement:.2f}% lower than persistence."
-                      if improvement is not None else "The baseline has zero test error; percentage improvement is undefined.")
+    interpretation = "The baseline has zero test error; percentage improvement is undefined."
+    if improvement is not None:
+        comparison = "lower" if improvement >= 0 else "higher"
+        interpretation = f"Selected model's test error is {abs(improvement):.2f}% {comparison} than persistence."
     if selectedName == "persistence":
         interpretation = "Validation chose the simple persistence baseline. Neither learned model earned selection."
     if improvement is not None and improvement < 0:
