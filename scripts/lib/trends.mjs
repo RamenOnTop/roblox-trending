@@ -1,3 +1,4 @@
+import {breakoutHours,detectBreakout} from './breakouts.mjs';
 export const rangeHours = [24, 168, 336, 720];
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const finite = value => typeof value === 'number' && Number.isFinite(value);
@@ -102,6 +103,7 @@ export function buildDashboard(games, snapshots, metadata) {
     byGame.set(sample.gameId, list);
   }
   for (const list of byGame.values()) list.sort((left, right) => Date.parse(right.capturedAt) - Date.parse(left.capturedAt));
+  const signals = new Map(games.map(game=>[game.id,Object.fromEntries(breakoutHours.map(hours=>[hours,detectBreakout(byGame.get(game.id)??[],hours,nowMs)]))]));
   const ranges = {};
   for (const windowHours of rangeHours) {
     const byGenre = new Map();
@@ -132,7 +134,8 @@ export function buildDashboard(games, snapshots, metadata) {
         medianConfidence, confidenceBand: medianConfidence >= 0.66 ? 'High' : medianConfidence >= 0.33 ? 'Medium' : 'Low',
         leaderGrowthMedian: median(measured.filter(game => game.activePlayersNow >= 100000).map(game => game.rWindowPct)),
         breakoutGrowthMedian: median(measured.filter(game => game.activePlayersNow < 50000).map(game => game.rWindowPct)),
-        breakoutsCount: measured.filter(game => game.activePlayersNow < 75000 && game.rWindowPct >= 8 && game.growthAbsWindow >= 2000).length,
+        breakoutsCount: group.games.filter(game=>signals.get(game.id)?.[24]?.status==='sustained').length,
+        breakoutsWindowHours: 24,
         topGames: group.games.slice(0, 5).map(game => ({ id: game.id, name: game.name, creator: game.creator, iconUrl: game.enrichment?.iconUrl ?? null, activePlayersNow: game.activePlayersNow, rWindowPct: game.rWindowPct, r24hPct: game.r24hPct })),
       };
     });
@@ -155,9 +158,9 @@ export function buildDashboard(games, snapshots, metadata) {
       const growthPct = first && window.length > 1 && first.activePlayers > 0 ? (current.activePlayers - first.activePlayers) / first.activePlayers * 100 : null;
       return [hours, {growthPct, hoursUsed:score?.windowHoursUsed ?? 0, confidence:score?.confidence ?? 0, score:score?.score ?? 0, sparkline}];
     }));
-    return {...game,activePlayers:current?.activePlayers ?? null,visits:current?.visits ?? null,favorites:current?.favorites ?? null,likeRatio:current?.likeRatio ?? null,metrics};
+    return {...game,activePlayers:current?.activePlayers ?? null,visits:current?.visits ?? null,favorites:current?.favorites ?? null,likeRatio:current?.likeRatio ?? null,metrics,breakouts:signals.get(game.id)};
   });
-  return { schemaVersion: 3, meta: metadata, ranges, games: details };
+  return { schemaVersion: 4, meta: metadata, ranges, games: details };
 }
 
 export function buildGameHistory(snapshots) {

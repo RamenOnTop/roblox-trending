@@ -4,6 +4,25 @@ The frontend now offers a dark research dashboard with selectable game and genre
 
 Recent charts include raw observations from the last 24 hours, together with the existing 30-day hourly history, within the configured history row budget. The collector exports individual game history files under `public/data/games/` so selecting a game does not download every game's full history. Table sparklines use a small set of real observations; growth is the actual percentage change in counts across the available window, and zero baselines remain unavailable. No database schema changes are required for this frontend update.
 
+### Breakout research
+
+The **Breakouts** tab shows up to five steady growers for 3, 6, or 24 hours, primary genre filters, a genre summary, watchlist stars, and links to full game charts. `scripts/lib/breakouts.mjs` derives these observations from existing history during collection; schema version 4 adds per-game `breakouts` records. No new Roblox API calls, Supabase tables, or browser database queries are needed. Older published datasets show a waiting state until the next collection. A snapshot older than 75 minutes shows a freshness notice.
+
+Starting audience determines the simultaneous player-gain and percentage thresholds:
+
+| Starting players | Minimum gain | Minimum growth | Minimum ending players |
+| --- | --- | --- | --- |
+| Under 1,000 | 100 | 30% | 200 |
+| 1,000–9,999 | 300 | 20% | — |
+| 10,000–74,999 | 1,000 | 10% | — |
+| 75,000+ | 3,000 | 8% | — |
+
+Require a baseline within 15 minutes of the requested start, at least 90% of the window, four valid observations, latest observation no older than 45 minutes relative to collection, and no gap exceeding 45 minutes (75 for the 24-hour window). Zero baselines, negative/invalid counts, duplicates and future observations cannot fabricate qualification. Gains must meet both thresholds across the last three observations spanning at least 54 minutes. A single increase contributing at least 70% of net gain is a separate **Single jump** signal; more than 25% below the observed peak is **Cooling off**; growth that has not held long enough is **Early movement**. These signals never fill missing top-five slots.
+
+Ranking uses 60% of percentage growth divided by its tier threshold plus 40% of player gain divided by its tier threshold; each ratio is capped at 3. Ties use percentage growth, then game ID for deterministic ordering. Genre summaries count qualifying tracked games and show the total tracked cohort. Existing genre `breakoutsCount` now counts validated 24-hour steady growers, with explicit `breakoutsWindowHours: 24`, independently of the genre chart range.
+
+These are untrained screening rules, not forecasts or measured probabilities. Daily audience cycles, updates and events can qualify. The ML experiment remains separate and must beat time-ordered baselines before live predictions are introduced.
+
 A Next.js dashboard for exploring Roblox genre momentum. GitHub Pages serves the static frontend; GitHub Actions collects public Roblox statistics and publishes the dashboard dataset. Supabase is optional for the first live snapshot and required for durable history, growth comparisons, and future ML training.
 
 ## GitHub Pages and Actions
