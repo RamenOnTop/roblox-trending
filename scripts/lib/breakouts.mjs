@@ -17,7 +17,8 @@ export function detectBreakout(samples, hours, nowMs) {
   const all = [...unique.values()].sort((a,b)=>a.time-b.time);
   const latest = all.at(-1);
   const target = nowMs-hours*3600000;
-  const first = all.filter(point=>Math.abs(point.time-target)<=15*60000)
+  // Allow normal collection jitter around a half-hour cadence, including manual runs.
+  const first = all.filter(point=>Math.abs(point.time-target)<=20*60000)
     .sort((a,b)=>Math.abs(a.time-target)-Math.abs(b.time-target)||a.time-b.time)[0];
   const points = first ? all.filter(point=>point.time>=first.time) : all.filter(point=>point.time>=target);
   const hoursUsed = points.length>1 ? (latest.time-points[0].time)/3600000 : 0;
@@ -36,8 +37,10 @@ export function detectBreakout(samples, hours, nowMs) {
   if (gain<tier.minGain || growthPct<tier.minPct || latest.value<tier.minCurrent) return {...result,status:'belowThreshold'};
   const peak = Math.max(...points.map(point=>point.value));
   const largestJump = Math.max(...points.slice(1).map((point,index)=>Math.max(0,point.value-points[index].value)));
-  const held = points.slice(-3);
-  const heldLongEnough = (held.at(-1).time-held[0].time)/3600000>=0.9;
+  // Extra observations must not shorten the hold period and erase an existing signal.
+  const holdIndex = points.findLastIndex(point=>point.time<=latest.time-54*60000);
+  const held = holdIndex<0 ? [] : points.slice(holdIndex);
+  const heldLongEnough = held.length>=3 && (held.at(-1).time-held[0].time)/3600000>=0.9;
   const heldThreshold = held.every(point=>point.value-first.value>=tier.minGain && (point.value-first.value)/first.value*100>=tier.minPct && point.value>=tier.minCurrent);
   const status = latest.value<peak*0.75 ? 'cooling' : largestJump>=gain*0.7 ? 'spike' : heldLongEnough&&heldThreshold ? 'sustained' : 'early';
   // Compare strength relative to each size tier; the score is a ranking, not confidence.

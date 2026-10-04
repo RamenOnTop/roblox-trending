@@ -20,6 +20,18 @@ test('audience tier uses starting size and established games have their own thre
   assert.equal(signal.status,'sustained');
   assert.equal(detectBreakout(observations(gradual.map(value=>100000+value)),6,nowMs).status,'belowThreshold');
 });
+test('manual runs between scheduled captures tolerate baseline jitter and do not erase held growth',()=>{
+  const samples=observations(gradual).map((sample,index)=>({...sample,capturedAt:new Date(index===gradual.length-1?nowMs:Date.parse(sample.capturedAt)+16*60000).toISOString()}));
+  const signal=detectBreakout(samples,6,nowMs);
+  assert.equal(signal.status,'sustained');
+  assert.ok(signal.hoursUsed>=5.7&&signal.hoursUsed<6);
+  assert.equal(signal.observations,13);
+});
+test('an additional manual observation cannot turn less than 54 minutes of held growth into a steady pick',()=>{
+  const samples=observations([100,105,110,115,120,125,130,135,140,145,150,175,210]);
+  samples.push({gameId:'1',capturedAt:new Date(nowMs+5*60000).toISOString(),activePlayers:215});
+  assert.equal(detectBreakout(samples,6,nowMs+5*60000).status,'early');
+});
 test('missing, stale and patchy history cannot become steady-growth picks',()=>{
   assert.equal(detectBreakout(observations(gradual.slice(-4)),6,nowMs).status,'insufficientHistory');
   const patchy=observations(gradual).filter((point,index)=>index!==4&&index!==5);
