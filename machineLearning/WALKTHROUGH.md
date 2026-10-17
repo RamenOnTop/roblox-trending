@@ -1,14 +1,39 @@
 # Learn player forecasting with Roblox Trends
 
-This first experiment predicts concurrent players about one hour ahead. It is separate from the production website and its 30-minute collector. No new database tables or keys are required. The experiment reads raw observations; it does not change Supabase data or publish predictions to Pages.
+These experiments predict concurrent players about one hour ahead. They are separate from the production website and its 30-minute collector. No new database tables or keys are required. They read raw observations; they do not change Supabase data or publish predictions to Pages.
 
-## Run the first experiment
+## Current default: archives and walk-forward evaluation
 
-In GitHub, open **Actions → Learn and evaluate player forecasts → Run workflow → main → Run workflow**. The manual workflow already uses the existing Supabase secrets. It exports up to seven days of `trendSnapshots`, installs pinned Python libraries, runs safety checks, builds examples, trains candidates, and uploads an artifact named `forecastExperiment` followed by the run ID.
+Since October 17, the manual workflow combines verified release archives with a recent seven-day Supabase export. Only game IDs, capture times and public player counts enter the training artifact. It checks each compressed archive's SHA-256, size, header and row count, keeps a provenance manifest, normalizes timestamps and removes identical overlaps. Conflicting player counts or missing source days stop the run. Multiple immutable archive versions are merged, never silently replaced. Daily coverage checks detect missing days, not every missing half-hour; the model's existing gap checks still apply. The combined budget is two million unique rows; exceeding it fails explicitly rather than silently truncating history.
+
+`walkForwardExperiment.py` fixes three two-day test windows ending at the latest completed UTC midnight. Each test follows a one-day validation window, and training expands through the earlier available history. The first round requires at least five days of eligible earlier history. Test periods do not overlap; later rounds can train on earlier rounds' outcomes because those outcomes are then in the past. Training labels cannot cross into validation, validation labels cannot cross into tests, and test labels cannot cross their end boundary. All games share those time boundaries.
+
+The same linear and tree settings are retained. A stronger **previous-day baseline** joins persistence: when forecasting noon today, use an actual count from around noon yesterday, at most 45 minutes older than the matching time. Missing seasonal history falls back to the current count and coverage is reported. Validation selects among the two baselines and two learned models, before any test scores are computed. It also selects the better simple baseline for a separate comparison.
+
+Each round records its selection, errors and baseline coverage. Aggregate scores recompute game-level errors over the disjoint test rows, rather than averaging round percentages. `selected` means the strategy chosen separately on each round's validation period; it is not a candidate picked after looking at test results. Historical fold models are saved for reproducibility, not published as live forecasts.
+
+Some historical dates have already been examined during development. This expanded run is a retrospective robustness check, not a new sealed final test. Overlapping training and correlated nearby observations also mean three successful rounds are not three independent guarantees. We still need future outcomes and more weeks of coverage.
+
+### Run the expanded experiment
+
+In GitHub, open **Actions → Learn and evaluate player forecasts → Run workflow → main → Run workflow**. Download the completed `forecastExperiment` artifact. Begin with **lesson.md**, then inspect **report.json**, **evaluationPlan.json**, **provenance.json**, and **testPredictions.csv**. The exact merged player observations and three historical fold model files are included. Artifacts expire after 14 days; the release archives remain the durable source.
+
+To reproduce from an already-downloaded merged dataset, run in PowerShell:
+
+```powershell
+cd 'C:\Users\Aweso\ChatGPT\Roblox Trends\roblox-trends'
+& '.\machineLearning\.venv\Scripts\python.exe' machineLearning/walkForwardExperiment.py --input 'C:\path\to\observations.jsonl' --output machineLearning/output/walkForwardReview
+```
+
+No credentials are needed for this local replay. The workflow only reads seven recent days from Supabase; older history comes from GitHub, keeping database bandwidth bounded. Archive downloads are read-only, and checksums are verified again on each run. The archive cache is outside the uploaded artifact, so full archived vote/visit columns are excluded.
+
+## Original single-split experiment reference
+
+`forecastExperiment.py` preserves the original single-split method used in the earlier October experiments. The current workflow uses the expanded evaluation above; this script remains available for reproducing older artifacts and learning the original stages.
 
 Open the completed run and download that artifact. Begin with **lesson.md**, then inspect **examples.csv** and **testPredictions.csv**. `report.json` contains the same results in a format programs can read; `audit.json` describes the source data. The artifact also includes the exact source observations and a saved selected model. Artifacts expire after 14 days, so download a run you want to keep. These are experiment artifacts, not the long-term history archives.
 
-The script can be run locally using the isolated environment created in this project. Run these commands in **PowerShell**, from the repository folder:
+The original script can be run locally using the isolated environment created in this project. Run these commands in **PowerShell**, from the repository folder:
 
 ```powershell
 cd 'C:\Users\Aweso\ChatGPT\Roblox Trends\roblox-trends'

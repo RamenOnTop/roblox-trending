@@ -181,6 +181,13 @@ def saveJson(path, value):
     Path(path).write_text(json.dumps(value, indent=2, allow_nan=False), encoding="utf-8")
 
 
+def makeCandidates():
+    return {"persistence": None,
+            "linear": make_pipeline(StandardScaler(), Ridge(alpha=10)),
+            "boostedTrees": HistGradientBoostingRegressor(max_iter=120, max_leaf_nodes=15,
+                learning_rate=0.05, l2_regularization=10, early_stopping=False, random_state=42)}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", default=str(Path(__file__).parent / "output/observations.jsonl"))
@@ -215,10 +222,7 @@ def main():
     # 4. Fit only on training rows. Disable the tree's automatic random holdout.
     trainMatrix = np.array([row["features"] for row in splits["train"]])
     trainTarget = np.array([row["targetLogChange"] for row in splits["train"]])
-    candidates = {"persistence": None,
-                  "linear": make_pipeline(StandardScaler(), Ridge(alpha=10)),
-                  "boostedTrees": HistGradientBoostingRegressor(max_iter=120, max_leaf_nodes=15,
-                      learning_rate=0.05, l2_regularization=10, early_stopping=False, random_state=42)}
+    candidates = makeCandidates()
     for model in candidates.values():
         if model is not None:
             model.fit(trainMatrix, trainTarget)
