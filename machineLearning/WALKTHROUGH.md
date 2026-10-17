@@ -103,7 +103,7 @@ The reported relative improvement is improvement in an error metric, not a perce
 
 ## Lesson 6: repeat and then connect inference
 
-Keep the first artifact as a dated experiment. Compare later runs across several weeks, including different weekdays and Roblox events. Reusing overlapping test periods is useful for development but does not create independent new evidence. The seven-day export deliberately limits database bandwidth; eventually we will incorporate the already-verified raw archives for longer training windows rather than repeatedly downloading all history.
+Keep each artifact as a dated experiment. Compare later runs across several weeks, including different weekdays and Roblox events. Reusing overlapping test periods is useful for development but does not create independent new evidence. The seven-day Supabase export deliberately limits database bandwidth; the current walk-forward workflow combines it with verified raw archives for longer training windows without repeatedly downloading all history from Supabase.
 
 Training produces `model.joblib`. **Inference** would load the selected model, calculate the same features from current observations, and forecast without seeing any future label. Load only model files produced by our own trusted workflow; joblib files can execute code, and their Python/library versions need to match.
 
