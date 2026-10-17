@@ -43,6 +43,7 @@ next-env.d.ts
 public/data/
 .collectorState/
 .historyArchives/
+.mlLab/
 machineLearning/.venv/
 machineLearning/output/
 machineLearning/__pycache__/

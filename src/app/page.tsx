@@ -2,11 +2,12 @@
 import {useEffect,useMemo,useState} from 'react';
 import GenreFinanceChart from './components/GenreFinanceChart';
 import BreakoutsPanel from './components/BreakoutsPanel';
+import MlLabPanel from './components/MlLabPanel';
 import {Brand,GameIcon,Icon,PageLink as Link,RangePicker,Sparkline,useWatchlist} from './components/TrendsUi';
 import {gameHref,loadDashboard,loadGameHistory,type Dataset,type Game,type Point} from './lib/dashboardData';
 import {compact,duration,number,percent} from './lib/display';
 
-type View='overview'|'discover'|'watch'|'breakouts';
+type View='overview'|'discover'|'watch'|'breakouts'|'lab';
 const emptyDataset:Dataset={meta:{},games:[],ranges:{}};
 const emptyPoints:Point[]=[];
 
@@ -28,7 +29,7 @@ export default function Home(){
   const {watchlist,toggle,ready,storageError}=useWatchlist();
 
   useEffect(()=>{
-    function readView(){const next=window.location.hash.slice(1);if(['overview','discover','watch','breakouts'].includes(next))setView(next as View);}
+    function readView(){const next=window.location.hash.slice(1);if(['overview','discover','watch','breakouts','lab'].includes(next))setView(next as View);}
     readView();window.addEventListener('hashchange',readView);
     return()=>window.removeEventListener('hashchange',readView);
   },[]);
@@ -90,26 +91,26 @@ export default function Home(){
     <aside className="sidebar">
       <Link href="/" className="brandLink" aria-label="Roblox Trends home"><Brand/></Link>
       <div className="workspaceLabel">YOUR RESEARCH SPACE</div>
-      <nav className="mainNav" aria-label="Main navigation">{([{id:'overview',label:'Overview',icon:'overview'},{id:'discover',label:'Discover',icon:'discover'},{id:'breakouts',label:'Breakouts',icon:'chart'},{id:'watch',label:'Watchlist',icon:'watch'}] as const).map(item=><button key={item.id} className={view===item.id?'navItem selected':'navItem'} onClick={()=>changeView(item.id)} aria-label={item.label} title={item.label} aria-current={view===item.id?'page':undefined}><Icon name={item.icon}/><span>{item.label}</span>{item.id==='watch'&&watchlist.length>0?<span className="navCount">{watchlist.length}</span>:null}</button>)}</nav>
+      <nav className="mainNav" aria-label="Main navigation">{([{id:'overview',label:'Overview',icon:'overview'},{id:'discover',label:'Discover',icon:'discover'},{id:'breakouts',label:'Breakouts',icon:'chart'},{id:'lab',label:'ML Lab',icon:'lab'},{id:'watch',label:'Watchlist',icon:'watch'}] as const).map(item=><button key={item.id} className={view===item.id?'navItem selected':'navItem'} onClick={()=>changeView(item.id)} aria-label={item.label} title={item.label} aria-current={view===item.id?'page':undefined}><Icon name={item.icon}/><span>{item.label}</span>{item.id==='watch'&&watchlist.length>0?<span className="navCount">{watchlist.length}</span>:null}</button>)}</nav>
       <div className="sidebarNote"><span className="noteOrbit"><Icon name="chart" size={24}/></span><h3>Spot the next wave.</h3><p>Follow the games and genres gaining attention.</p><button onClick={()=>changeView('discover')}>Explore games <Icon name="arrow" size={15}/></button></div>
       <div className="sidebarBottom"><Link href="/about"><Icon name="info" size={17}/> How the data works</Link><span>Made for curious creators.</span></div>
     </aside>
 
     <div className="mainWorkspace">
-      <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <strong>{view==='breakouts'?'Breakouts':view==='watch'?'Watchlist':view==='discover'?'Discover':'Overview'}</strong></div><div className="topbarRight"><span className="collectionStatus"><i/> Public Roblox data</span><span className="creatorAvatar">R<span/></span></div></header>
+      <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <strong>{view==='lab'?'ML Lab':view==='breakouts'?'Breakouts':view==='watch'?'Watchlist':view==='discover'?'Discover':'Overview'}</strong></div><div className="topbarRight"><span className="collectionStatus"><i/> Public Roblox data</span><span className="creatorAvatar">R<span/></span></div></header>
       <main className="dashboardMain">
-        <div className="pageHeading"><div><p className="eyebrow">A LITTLE SIGNAL. A BIGGER PICTURE.</p><h1>{view==='breakouts'?'Catch the next wave of growth.':view==='watch'?'Your next ideas, on watch.':view==='discover'?'Find what’s catching on.':'See where Roblox is heading.'}</h1><p className="pageSubheading">{view==='breakouts'?'Find growing audiences, follow the genres, and see what’s behind the movement.':view==='watch'?'A personal shortlist of experiences worth following.':view==='discover'?'Explore the audience, the movement, and the games behind it.':'Turn player activity into a little inspiration for your next game.'}</p></div><div className="updatePill"><span className="statusDot"/><span>{updated?<>Last collection <strong>{updated.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}</strong></>:'Waiting for collection'}</span></div></div>
+        <div className="pageHeading"><div><p className="eyebrow">A LITTLE SIGNAL. A BIGGER PICTURE.</p><h1>{view==='lab'?'A little prediction. A real-world check.':view==='breakouts'?'Catch the next wave of growth.':view==='watch'?'Your next ideas, on watch.':view==='discover'?'Find what’s catching on.':'See where Roblox is heading.'}</h1><p className="pageSubheading">{view==='lab'?'Follow our experimental forecasts and see how they compare with what actually happened.':view==='breakouts'?'Find growing audiences, follow the genres, and see what’s behind the movement.':view==='watch'?'A personal shortlist of experiences worth following.':view==='discover'?'Explore the audience, the movement, and the games behind it.':'Turn player activity into a little inspiration for your next game.'}</p></div><div className="updatePill"><span className="statusDot"/><span>{updated?<>Last collection <strong>{updated.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}</strong></>:'Waiting for collection'}</span></div></div>
         {error?<div className="errorNotice" role="alert">{error} <button onClick={()=>window.location.reload()}>Try again</button></div>:null}
         {storageError?<div className="errorNotice" role="status">Your browser couldn’t save the watchlist. It will last for this session.</div>:null}
 
-        {view!=='breakouts'?<section className="overviewStats" aria-label="Tracked sample overview">
+        {view!=='breakouts'&&view!=='lab'?<section className="overviewStats" aria-label="Tracked sample overview">
           <div className="statTile"><span className="statLabel">Players in our sample <Icon name="players" size={16}/></span><strong>{loading?'—':compact(playerTotal)}</strong><span>Across {number(games.length)} tracked games</span></div>
           <div className="statTile"><span className="statLabel">Experiences tracked <Icon name="globe" size={16}/></span><strong>{loading?'—':number(games.length)}</strong><span>{genreLabels.length} primary genres to explore</span></div>
           <div className="statTile"><span className="statLabel">Games gaining players <Icon name="chart" size={16}/></span><strong>{loading||!measured.length?'—':`${growers.length}`}<small>{measured.length?` / ${measured.length}`:''}</small></strong><span>{measured.length?'Across available history in this range':'More observations are needed'}</span></div>
           <div className="statTile statHighlight"><span className="statLabel">Your watchlist <Icon name="watch" size={16}/></span><strong>{watchlist.length}<small> {watchlist.length===1?'game':'games'}</small></strong><button className="textButton" onClick={()=>changeView('watch')}>Keep your ideas close <Icon name="arrow" size={14}/></button></div>
         </section>:null}
 
-        {view==='breakouts'?<BreakoutsPanel dataset={dataset} loading={loading} watchlist={watchlist} toggle={toggle} ready={ready}/>:<div className="dashboardGrid">
+        {view==='lab'?<MlLabPanel games={games}/>:view==='breakouts'?<BreakoutsPanel dataset={dataset} loading={loading} watchlist={watchlist} toggle={toggle} ready={ready}/>:<div className="dashboardGrid">
           <section className="panel heroPanel">
             <div className="panelTop"><div className="segmented"><button className={chartMode==='game'?'active':''} onClick={()=>setChartMode('game')}>Game activity</button><button className={chartMode==='genre'?'active':''} onClick={()=>setChartMode('genre')}>Genre lens</button></div><span className="quietLabel"><span className="statusDot"/> COLLECTED SNAPSHOTS</span></div>
             <div className="heroIdentity">{chartMode==='game'&&selected?<GameIcon game={selected} size="large"/>:<span className="genreHeroIcon"><Icon name="chart" size={30}/></span>}<div className="heroName"><p>{chartMode==='game'?selected?.creator??'Roblox experiences':'A view across the tracked sample'}</p><h2>{chartMode==='game'?selected?.name??(loading?'Loading experiences…':'No games collected yet'):genre?.key??'Genre activity'}</h2></div>{chartMode==='game'&&selected?<button className={`iconButton watchButton ${watchlist.includes(selected.id)?'saved':''}`} aria-label={`${watchlist.includes(selected.id)?'Remove':'Add'} ${selected.name} ${watchlist.includes(selected.id)?'from':'to'} watchlist`} aria-pressed={watchlist.includes(selected.id)} disabled={!ready} onClick={()=>toggle(selected.id)}><Icon name="watch"/></button>:null}</div>

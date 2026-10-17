@@ -107,7 +107,7 @@ Keep each artifact as a dated experiment. Compare later runs across several week
 
 Training produces `model.joblib`. **Inference** would load the selected model, calculate the same features from current observations, and forecast without seeing any future label. Load only model files produced by our own trusted workflow; joblib files can execute code, and their Python/library versions need to match.
 
-The next product step is to save timestamped forecasts and measure their later outcomes before adding an experimental UI. Retraining and forecasting are different operations: a saved model can forecast every collection without being retrained every half hour. We have not enabled automatic training, uncertainty intervals, or live model predictions in this first experiment.
+The ML Lab now records forward experimental forecasts and compares them with later observed outcomes, separately from these historical evaluations. Its fixed model is pinned in config/mlLab.json and its verified forecast/outcome/metadata journals live in the roblox-ml-lab release. Retraining and forecasting are different operations: the saved model forecasts every successful collection without being retrained every half hour. Automatic training and calibrated uncertainty intervals remain disabled. The first live results need later collections; historical test rows are never backfilled as live predictions.
 
 ## Explain the project yourself
 

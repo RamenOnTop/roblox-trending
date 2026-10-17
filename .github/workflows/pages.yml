@@ -18,6 +18,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -45,6 +49,38 @@ jobs:
       - name: Configure Pages
         id: pages
         uses: actions/configure-pages@v5
+      - uses: actions/setup-python@v6
+        continue-on-error: true
+        with:
+          python-version: '3.12'
+      - name: Install pinned forecast runtime
+        id: mlRuntime
+        continue-on-error: true
+        run: python -m pip install -r machineLearning/requirements.txt
+      - name: Restore ML journal checkpoint
+        uses: actions/cache/restore@v5
+        with:
+          path: .mlLab/state.json.gz
+          key: mlLabState-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mlLabState-v1-
+      - name: Record experimental forecasts and score earlier outcomes
+        id: mlLab
+        if: steps.mlRuntime.outcome == 'success'
+        continue-on-error: true
+        run: node scripts/runMlLab.mjs
+        env:
+          githubToken: ${{ github.token }}
+          OMP_NUM_THREADS: 2
+          OPENBLAS_NUM_THREADS: 2
+      - name: Report unavailable ML without interrupting collection
+        if: steps.mlLab.outcome != 'success'
+        run: node -e "require('fs').writeFileSync('public/data/mlLab.json',JSON.stringify({schemaVersion:1,status:'unavailable',generatedAt:new Date().toISOString(),message:'Forecast recording is temporarily unavailable. Player collection continues.'}))"
+      - name: Save verified ML checkpoint
+        if: steps.mlLab.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: .mlLab/state.json.gz
+          key: mlLabState-v1-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Export static frontend
         run: npm run build:pages
         env:

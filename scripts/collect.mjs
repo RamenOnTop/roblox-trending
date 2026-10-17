@@ -134,6 +134,9 @@ try {
     const validIds = new Set(games.map(game=>game.id));
     await saveCollectorState(statePath,{scope,generatedAt,gameIds:[...validIds],...checkpoint,enrichment:[...cached.values()].filter(row=>validIds.has(row.gameId))});
   }
+  const labInput=new URL('../.mlLab/',import.meta.url);
+  await mkdir(labInput,{recursive:true});
+  await writeFile(new URL('collection.json',labInput),JSON.stringify({schemaVersion:1,collectionId,generatedAt,games,currentSamples,rawSamples:checkpoint?.rawSamples??currentSamples}));
   console.log(JSON.stringify({ collected: games.length, tracked: ids.length, historySource: meta.historySource, historyRows: history.samples.length, historyMode:meta.historyMode,historyRowsDownloaded,historyJsonBytesDownloaded,enrichmentRowsDownloaded,generatedAt }));
 } catch (error) {
   if (database) await database.from('collectionRuns').update({ completedAt: new Date().toISOString(), status: 'failed', warning: error.message }).eq('id', collectionId);

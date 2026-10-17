@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "model": {
+    "schemaVersion": 1,
+    "modelVersion": "trees-ad0a48c45271",
+    "modelFile": "model-ad0a48c452715f67b17e896c0292a7374297c14c2ac1dc7b8044b39ac086985c.joblib",
+    "sha256": "ad0a48c452715f67b17e896c0292a7374297c14c2ac1dc7b8044b39ac086985c",
+    "createdAt": "2026-10-17T16:49:39.606761+00:00",
+    "trainedThrough": "2026-10-17T16:14:47.627000+00:00",
+    "trainingExamples": 336051,
+    "sklearnVersion": "1.7.2",
+    "featureNames": [
+      "logPlayersNow",
+      "logPlayers1hAgo",
+      "logPlayers3hAgo",
+      "logGrowthPerHour1h",
+      "logGrowthPerHour3h",
+      "meanLogPlayers3h",
+      "stdLogPlayers3h",
+      "peakLogPlayers3h",
+      "lagAge1h",
+      "lagAge3h",
+      "hourSin",
+      "hourCos",
+      "daySin",
+      "dayCos"
+    ],
+    "horizonMinutes": 60,
+    "status": "experimental",
+    "sourceSha256": "19ba89c9c510058a0eb093a6f9a6f517e0e579c7090df15bc17ee9f0cb448729"
+  }
+}
