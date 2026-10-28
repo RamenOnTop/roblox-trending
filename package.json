@@ -11,6 +11,11 @@
     "collect": "node scripts/collect.mjs",
     "archive:history": "node scripts/archiveHistory.mjs",
     "ml:export": "node scripts/exportTraining.mjs",
+    "history:start": "node scripts/localHistory.mjs start",
+    "history:sync": "node scripts/localHistory.mjs sync",
+    "history:status": "node scripts/localHistory.mjs status",
+    "history:sql": "node scripts/localHistory.mjs sql",
+    "history:stop": "node scripts/localHistory.mjs stop",
     "build:pages": "node scripts/buildPages.mjs",
     "test:data": "node --test scripts/tests/*.test.mjs"
   },

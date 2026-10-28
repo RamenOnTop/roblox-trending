@@ -43,6 +43,7 @@ next-env.d.ts
 public/data/
 .collectorState/
 .historyArchives/
+.localHistory/
 .mlLab/
 machineLearning/.venv/
 machineLearning/output/

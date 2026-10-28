@@ -1,0 +1,22 @@
+name: roblox-trends-local-history
+services:
+  historyDatabase:
+    image: ${historyImage:?Run npm run history:start first}
+    container_name: robloxTrendsHistory
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: historyOwner
+      POSTGRES_DB: robloxHistory
+      POSTGRES_PASSWORD: ${historyPassword:?Run npm run history:start first}
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - historyData:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U historyOwner -d robloxHistory"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+volumes:
+  historyData:
+    name: robloxTrendsHistoryData
