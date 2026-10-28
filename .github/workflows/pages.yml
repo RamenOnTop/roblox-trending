@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      rebuildHistory:
+        description: Rebuild chart history without the collector cache
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,21 +36,26 @@ jobs:
       - run: npm ci
       - run: npm run test:data
       - name: Restore collector checkpoint
+        if: inputs.rebuildHistory != true
         uses: actions/cache/restore@v5
         with:
           path: .collectorState
-          key: collectorState-v1-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: collectorState-v1-
+          key: collectorState-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            collectorState-v2-
+            collectorState-v1-
       - name: Collect public Roblox statistics
         run: npm run collect
         env:
           supabaseUrl: ${{ secrets.supabaseUrl }}
           supabaseServiceKey: ${{ secrets.supabaseServiceKey }}
+          githubToken: ${{ github.token }}
+          rebuildHistory: ${{ inputs.rebuildHistory }}
       - name: Save updated collector checkpoint
         uses: actions/cache/save@v5
         with:
           path: .collectorState
-          key: collectorState-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          key: collectorState-v2-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Configure Pages
         id: pages
         uses: actions/configure-pages@v5

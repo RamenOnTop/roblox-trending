@@ -5,6 +5,8 @@ import { buildDashboard, buildGameHistory } from './lib/trends.mjs';
 import { enrichGames } from './lib/enrichment.mjs';
 import { fileURLToPath } from 'node:url';
 import { databaseScope, loadCollectorState, saveCollectorState, historyPlan, readHistoryPages, mergeHistory } from './lib/collectorState.mjs';
+import {restoreDashboardArchives} from './lib/dashboardArchives.mjs';
+import {createArchiveReader} from './lib/archiveReader.mjs';
 
 const config = JSON.parse(await readFile(new URL('../config/collection.json', import.meta.url), 'utf8'));
 const supabaseUrl = process.env.supabaseUrl;
@@ -15,7 +17,7 @@ const startedAt = new Date().toISOString();
 const collectionId = crypto.randomUUID();
 const statePath = fileURLToPath(new URL('../.collectorState/state.json.gz',import.meta.url));
 const scope = database ? databaseScope(`${supabaseUrl}|historyDays=${config.historyDays}`) : null;
-const loaded = database ? await loadCollectorState(statePath,scope) : {state:null,warning:null};
+const loaded = database && process.env.rebuildHistory!=='true' ? await loadCollectorState(statePath,scope) : {state:null,warning:null};
 const state = loaded.state;
 let enrichmentRowsDownloaded = 0;
 
@@ -89,6 +91,7 @@ try {
   let checkpoint = null;
   let historyRowsDownloaded = 0;
   let historyJsonBytesDownloaded = 0;
+  let archived={hourlySamples:[],archiveDigests:[],archiveDays:[],archiveRowsRead:0,archivesRead:0};
   if (database) {
     await writeBatches('trendGames', games, 'id');
     await writeBatches('trendSnapshots', currentSamples, 'gameId,capturedAt');
@@ -96,12 +99,15 @@ try {
     await writeBatches('trendHourlySamples', currentSamples.map(sample => ({ ...sample, bucketAt })), 'gameId,bucketAt');
     const validIds = games.map(game=>game.id);
     const rawRows = [];const hourlyRows = [];
-    for (const plan of historyPlan(state,validIds,generatedAt,config.historyDays)) {
+    for (const plan of historyPlan(state,validIds,generatedAt,config.historyDays,(config.dashboardDatabaseDays??14)+1)) {
       const part = await readHistoryPages(database,plan,{maxRows:config.maxHistoryRows-historyRowsDownloaded});
       historyRowsDownloaded += part.rows.length;historyJsonBytesDownloaded += part.jsonBytes;
       (plan.table === 'trendSnapshots' ? rawRows : hourlyRows).push(...part.rows);
     }
-    checkpoint = mergeHistory(state,[...rawRows,...currentSamples],[...hourlyRows,...currentSamples.map(sample=>({...sample,bucketAt}))],validIds,generatedAt,config.historyDays);
+    const archiveSince=new Date(Date.parse(generatedAt)-(config.historyDays+1)*86400000).toISOString().slice(0,10);
+    const archiveRecords=checked(await database.from('historyArchives').select('archiveDay,archiveDigest,rowCount,sourceFingerprint,archiveUrl').gte('archiveDay',archiveSince).order('archiveDay',{ascending:true}).limit(1000),'Read verified history archive ledger');
+    archived=await restoreDashboardArchives({records:archiveRecords,state,ids:validIds,generatedAt,historyDays:config.historyDays,readArchive:createArchiveReader(fileURLToPath(new URL('../.collectorState/archives/',import.meta.url))),maxHourlyRows:config.maxHistoryRows});
+    checkpoint = mergeHistory(state,[...rawRows,...currentSamples],[...archived.hourlySamples,...hourlyRows,...currentSamples.map(sample=>({...sample,bucketAt}))],validIds,generatedAt,config.historyDays);
     history.samples = [...checkpoint.rawSamples,...checkpoint.hourlySamples];
     if (history.samples.length > config.maxHistoryRows) throw new Error('Merged history exceeds the checkpoint budget.');
   }
@@ -113,10 +119,11 @@ try {
   const warnings = [loaded.warning,discoveryWarning, votesWarning, enrichmentStorageWarning, ...enriched.warnings].filter(Boolean);
   if (database) checked(await database.from('collectionRuns').update({ completedAt: new Date().toISOString(), status: 'complete', collectedGames: games.length, warning: warnings.join('; ').slice(0,4000) || null }).eq('id', collectionId), 'Complete collection run');
   if (warnings.length) console.warn(warnings.join('\n'));
-  const meta = { generatedAt, startedAt, collectionId, historySource: database ? 'Supabase' : 'currentSnapshot',
+  const meta = { generatedAt, startedAt, collectionId, historySource: database ? 'Supabase + verified GitHub archives' : 'currentSnapshot',
     gamesTracked: ids.length, gamesCollected: games.length, historyRows: history.samples.length,
     historyTruncated: history.truncated, trackingCapped: candidates.length > ids.length,
     historyMode: database ? (state ? 'incremental' : 'bootstrap') : 'currentSnapshot',historyRowsDownloaded,historyJsonBytesDownloaded,enrichmentRowsDownloaded,
+    dashboardDatabaseDays:config.dashboardDatabaseDays??14,archiveDays:archived.archiveDays,archiveRowsRead:archived.archiveRowsRead,archivesRead:archived.archivesRead,
     discoveryWarning, votesWarning, enrichmentStorageReady, enrichmentWarnings: enriched.warnings,
     enrichmentStorageWarning, sampleScope: 'Tracked chart games, configured seeds, and cached recommendations; not all Roblox experiences.' };
   const dashboard = buildDashboard(enriched.games, [...currentSamples, ...history.samples], meta);
@@ -132,12 +139,12 @@ try {
     const cached = new Map(cachedEnrichment.map(row=>[row.gameId,row]));
     for (const row of enriched.rows) cached.set(row.gameId,row);
     const validIds = new Set(games.map(game=>game.id));
-    await saveCollectorState(statePath,{scope,generatedAt,gameIds:[...validIds],...checkpoint,enrichment:[...cached.values()].filter(row=>validIds.has(row.gameId))});
+    await saveCollectorState(statePath,{scope,generatedAt,gameIds:[...validIds],...checkpoint,archiveDigests:archived.archiveDigests,enrichment:[...cached.values()].filter(row=>validIds.has(row.gameId))});
   }
   const labInput=new URL('../.mlLab/',import.meta.url);
   await mkdir(labInput,{recursive:true});
   await writeFile(new URL('collection.json',labInput),JSON.stringify({schemaVersion:1,collectionId,generatedAt,games,currentSamples,rawSamples:checkpoint?.rawSamples??currentSamples}));
-  console.log(JSON.stringify({ collected: games.length, tracked: ids.length, historySource: meta.historySource, historyRows: history.samples.length, historyMode:meta.historyMode,historyRowsDownloaded,historyJsonBytesDownloaded,enrichmentRowsDownloaded,generatedAt }));
+  console.log(JSON.stringify({ collected: games.length, tracked: ids.length, historySource: meta.historySource, historyRows: history.samples.length, historyMode:meta.historyMode,historyRowsDownloaded,historyJsonBytesDownloaded,enrichmentRowsDownloaded,archivesRead:archived.archivesRead,archiveRowsRead:archived.archiveRowsRead,archiveDays:archived.archiveDays.length,generatedAt }));
 } catch (error) {
   if (database) await database.from('collectionRuns').update({ completedAt: new Date().toISOString(), status: 'failed', warning: error.message }).eq('id', collectionId);
   console.error(error.message);

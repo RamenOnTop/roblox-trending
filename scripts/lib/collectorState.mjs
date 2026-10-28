@@ -18,6 +18,7 @@ export async function loadCollectorState(path, scope, now = Date.now()) {
     if (!Array.isArray(state.gameIds) || !Array.isArray(state.rawSamples) || !Array.isArray(state.hourlySamples) || !Array.isArray(state.enrichment)) throw new Error('Incomplete collector checkpoint.');
     state.rawSamples = state.rawSamples.map(unpack);
     state.hourlySamples = state.hourlySamples.map(unpack);
+    if(state.archiveDigests!=null&&(!Array.isArray(state.archiveDigests)||state.archiveDigests.some(digest=>! /^[a-f0-9]{64}$/.test(digest))))throw new Error('Invalid archive provenance in checkpoint.');
     for (const sample of [...state.rawSamples,...state.hourlySamples]) {
       if (!/^[1-9]\d*$/.test(sample.gameId) || !Number.isFinite(Date.parse(sample.capturedAt)) || !Number.isFinite(sample.activePlayers) || sample.activePlayers < 0) throw new Error('Invalid cached observation.');
     }
@@ -34,7 +35,7 @@ export async function saveCollectorState(path, state) {
   await rename(path+'.tmp',path);
 }
 
-export function historyPlan(state, ids, generatedAt, historyDays) {
+export function historyPlan(state, ids, generatedAt, historyDays, databaseHistoryDays=historyDays+1) {
   const now = Date.parse(generatedAt);
   const previous = state ? Date.parse(state.generatedAt) - 3600000 : null;
   const known = new Set(state?.gameIds ?? []);
@@ -43,7 +44,7 @@ export function historyPlan(state, ids, generatedAt, historyDays) {
     const group = ids.filter(id => known.has(id) !== fresh);
     for (const batch of batches(group,100)) {
       for (const table of ['trendSnapshots','trendHourlySamples']) {
-        const cutoff = now - (table === 'trendSnapshots' ? 1 : historyDays + 1) * dayMs;
+        const cutoff = now - (table === 'trendSnapshots' ? 1 : Math.min(historyDays+1,databaseHistoryDays)) * dayMs;
         plans.push({ids:batch,table,since:new Date(!fresh && previous != null ? Math.max(cutoff,previous) : cutoff).toISOString(),until:generatedAt});
       }
     }

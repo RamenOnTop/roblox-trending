@@ -2,6 +2,14 @@
 
 For local PostgreSQL history, verified archive downloads, and the catch-up command, see [Local history](LOCALHISTORY.md). Cloud collection continues independently of the local database.
 
+### Archive-backed chart rebuilds
+
+The collector reads recent hourly history from Supabase and restores older chart observations from the verified `historyArchives` ledger and immutable **roblox-history** release assets. Each restored archive must match its filename, SHA-256, byte count, row count and database fingerprint. Raw observations are reduced to the latest real observation per UTC hour; gaps remain gaps. The collector retains approximately 31 days of compact hourly observations in its disposable checkpoint, and 24 hours of raw chart observations. A new tracked game is backfilled from archives even if those archives were already processed for other games.
+
+`dashboardDatabaseDays: 14` bounds a bootstrap's database hourly reads, with a one-day overlap. This is independent of database deletion. A missing or corrupt required archive stops publication instead of silently publishing shortened charts. Warm collections reuse verified checkpoint provenance and compressed archive files. The collection workflow's **rebuildHistory** input skips checkpoint restoration to exercise a genuine cache-free rebuild. Public dataset metadata reports archive days and actual archives/rows read.
+
+After local archive sync, `npm run history:rehearse` compares a cache-free rebuild using only fourteen database days against the full archived reference. It checks all game-chart points and dashboard/genre metrics and saves `.localHistory/archiveRestoreRehearsal.json`. No Supabase credentials or writes are involved in this rehearsal.
+
 The frontend now offers a dark research dashboard with selectable game and genre charts, search, genre filters, sorting, and a browser-local watchlist. The watchlist does not require a login and does not sync across devices. Game detail links use `/game/?id=...` in both local and Pages builds. Run `npm run collect` to generate the local frontend dataset before `npm run dev`; the original API routes remain available independently.
 
 Recent charts include raw observations from the last 24 hours, together with the existing 30-day hourly history, within the configured history row budget. The collector exports individual game history files under `public/data/games/` so selecting a game does not download every game's full history. Table sparklines use a small set of real observations; growth is the actual percentage change in counts across the available window, and zero baselines remain unavailable. No database schema changes are required for this frontend update.
