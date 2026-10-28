@@ -67,4 +67,3 @@ export function readSnapshotArchive(name,bytes,manifest,now=Date.now()){
     return normalized;
   });
 }
-

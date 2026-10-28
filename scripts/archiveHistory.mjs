@@ -3,6 +3,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { archiveAndVerify, verifyArchive } from './lib/historyArchive.mjs';
+import {verifyHourlyPruneArchives} from './lib/hourlyRetention.mjs';
 
 const config = JSON.parse(await readFile(new URL('../config/collection.json',import.meta.url),'utf8'));
 if (!process.env.supabaseUrl || !process.env.supabaseServiceKey) {console.log('Archive skipped: no Supabase database configured.');process.exit(0);}
@@ -83,8 +84,16 @@ try {
     } else result = await archiveAndVerify(day,await dayRows(day),inspection,store,finalize);
     archivedDays++;prunedRows+=Number(result.prunedRows);
   }
-  const prunedHourlyRows = checked(await database.rpc('pruneArchivedHourlyHistory',{hourlyRetentionDays:config.hourlyRetentionDays}));
-  console.log(JSON.stringify({archiveStorageVerified:true,archivedDays,prunedRows,prunedHourlyRows,rawRetentionDays:config.rawRetentionDays,hourlyRetentionDays:config.hourlyRetentionDays}));
+  const hourlyPreview=checked(await database.rpc('inspectHourlyRetention',{hourlyRetentionDays:config.hourlyRetentionDays}));
+  let prunedHourlyRows=0,verifiedHourlyArchives=0;
+  if(hourlyPreview.candidateRows>0){
+    const hourlyRecords=checked(await database.from('historyArchives').select('*').in('archiveDay',hourlyPreview.archiveDays).order('archiveDay',{ascending:true}).limit(1000));
+    if(hourlyRecords.length>=1000)throw new Error('Hourly verification ledger budget exceeded.');
+    const verifiedArchiveDigests=await verifyHourlyPruneArchives(hourlyRecords,hourlyPreview.archiveDays,name=>store.download(name));
+    verifiedHourlyArchives=verifiedArchiveDigests.length;
+    prunedHourlyRows=checked(await database.rpc('pruneVerifiedHourlyHistory',{hourlyRetentionDays:config.hourlyRetentionDays,verifiedArchiveDigests}));
+  }
+  console.log(JSON.stringify({archiveStorageVerified:true,archivedDays,prunedRows,prunedHourlyRows,verifiedHourlyArchives,unverifiedHourlyRowsRetained:hourlyPreview.unverifiedRows,rawRetentionDays:config.rawRetentionDays,hourlyRetentionDays:config.hourlyRetentionDays}));
 } catch(error) {
   console.error('Archive maintenance stopped; unverified observations remain in Supabase: '+error.message);
   process.exitCode=1;

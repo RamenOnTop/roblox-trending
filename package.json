@@ -15,6 +15,7 @@
     "history:sync": "node scripts/localHistory.mjs sync",
     "history:status": "node scripts/localHistory.mjs status",
     "history:rehearse": "node scripts/rehearseDashboardHistory.mjs",
+    "history:recover": "node scripts/localHistory.mjs recover",
     "history:sql": "node scripts/localHistory.mjs sql",
     "history:stop": "node scripts/localHistory.mjs stop",
     "build:pages": "node scripts/buildPages.mjs",

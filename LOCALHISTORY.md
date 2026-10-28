@@ -12,6 +12,8 @@ npm run history:sync
 
 The command starts the database if necessary, downloads missing archives and manifests, verifies SHA-256, compressed size, header, row count, identities, dates and types, and imports each day in one transaction. PostgreSQL compares every imported row to its verified source before committing its ledger entry. Conflicting immutable versions stop the import without overwriting local observations. Identical overlapping observations have one local row. A repeat sync verifies cached archive files and skips already imported digests. An interrupted import can be retried; previously committed days remain available.
 
+The hosted collector now restores its own chart history from these same verified archives. It does not connect to this PC. Fourteen-day cloud hourly retention therefore does not shorten a fresh site's month view when the source observations exist in the archives.
+
 The current public game catalog is refreshed for names and genres. Those names describe the catalog's observation time, not historical metadata at the time of each player count. Missing archive days are explicitly listed in the final report. No missing observations are invented. Original anomalies, such as negative favorite counts, are retained and counted in the report.
 
 ## Inspect and query
@@ -50,6 +52,14 @@ npm run history:start
 ```
 
 The setup leaves other Docker projects alone. No Supabase keys are needed for archive sync. GitHub CLI must be installed and able to read the repository release. Node.js 22 or newer and Docker Compose are required.
+
+## Recover a pruned hourly day
+
+```powershell
+npm run history:recover -- 2026-10-02
+```
+
+This writes `.localHistory/recovery/hourly-recovery-2026-10-02.csv` with every original hourly column, reconstructed from the latest verified raw observation in each UTC hour. It never writes to Supabase. To restore a deleted day, use the Supabase Table Editor's CSV import on `public.trendHourlySamples`, or PostgreSQL `\copy` with the CSV header and the same column order. Keep existing game metadata and collection-run records, which provide its foreign keys. Import only the deleted day; existing primary keys prevent accidental duplicate records. The raw archives and local database are preserved after cloud cleanup.
 
 ## Cloud storage audit
 

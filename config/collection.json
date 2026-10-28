@@ -7,7 +7,7 @@
   "dashboardDatabaseDays": 14,
   "maxHistoryRows": 1000000,
   "rawRetentionDays": 7,
-  "hourlyRetentionDays": 35,
+  "hourlyRetentionDays": 14,
   "enrichmentGamesPerRun": 20,
   "enrichmentRefreshHours": 24,
   "enrichmentBudgetSeconds": 120

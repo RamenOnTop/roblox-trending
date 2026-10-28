@@ -133,13 +133,31 @@ async function sync(){
   }finally{await releaseLock();}
 }
 
+async function recoverHourly(){
+  const day=process.argv[3]==='--day'?process.argv[4]:process.argv[3];
+  if(!day||!/^\d{4}-\d{2}-\d{2}$/.test(day)||new Date(day+'T00:00:00Z').toISOString().slice(0,10)!==day)throw new Error('Use history:recover -- YYYY-MM-DD.');
+  const archiveCount=Number(query(`select count(*) from "localHistory"."archiveImports" where "archiveDay"=${sqlValue(day)};`));
+  if(!archiveCount)throw new Error('That UTC day has not been verified and imported locally. Run history:sync first.');
+  const sql=`copy (
+    select distinct on ("gameId",date_trunc('hour',"capturedAt")) "gameId",date_trunc('hour',"capturedAt") as "bucketAt","capturedAt","activePlayers",visits,favorites,"upVotes","downVotes","likeRatio","collectionId"
+    from "localHistory"."snapshots" where "capturedAt">=${sqlValue(day)}::date and "capturedAt"<${sqlValue(day)}::date+1
+    order by "gameId",date_trunc('hour',"capturedAt"),"capturedAt" desc
+  ) to stdout with (format csv,header);`;
+  const csv=query(sql);
+  const output=join(local,'recovery');await mkdir(output,{recursive:true});
+  const path=join(output,`hourly-recovery-${day}.csv`);
+  await writeFile(path,csv+'\n');
+  console.log(JSON.stringify({day,path,rows:csv.split('\n').length-1,destination:'public.trendHourlySamples',cloudWrites:false},null,2));
+}
+
 try{
   if(command==='start'){await start();console.log('Local PostgreSQL is ready on 127.0.0.1:55432 (database robloxHistory).');}
   else if(command==='sync'){await start();await sync();}
   else if(command==='status')console.log(query(statusSql));
+  else if(command==='recover'){await start();await recoverHourly();}
   else if(command==='stop'){docker([...composeArgs,'stop'],{stdio:'inherit'});console.log('Database stopped. Persistent data and archive files are retained.');}
   else if(command==='sql')docker(['exec','-it',container,'psql','--no-psqlrc','--username','historyOwner','--dbname','robloxHistory'],{stdio:'inherit',timeout:undefined});
-  else throw new Error('Use start, sync, status, sql, or stop.');
+  else throw new Error('Use start, sync, status, sql, recover, or stop.');
 }catch(error){
   console.error(error.stderr?.toString().trim()||error.message);
   process.exitCode=1;
